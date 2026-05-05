@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(bun run *)",
+      "Bash(docker info *)",
+      "Bash(brew install *)",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"vite dev\")",
+      "Bash(npm install *)",
+      "Bash(docker compose *)",
+      "Bash(docker exec *)",
+      "Bash(pkill -f \"tsx watch\")",
+      "Read(//usr/local/var/**)",
+      "Read(//opt/homebrew/var/**)",
+      "Bash(pkill -f \"concurrently\\\\|tsx watch\\\\|vite dev\")",
+      "Bash(node -e \"const pg=require\\('pg'\\); new pg.Pool\\({connectionString:'postgres://nanter:nanter@127.0.0.1:54322/nanter'}\\).query\\('SELECT current_user'\\).then\\(r=>console.log\\('OK',r.rows[0]\\)\\).catch\\(e=>console.error\\('FAIL',e.message\\)\\).finally\\(\\(\\)=>process.exit\\(\\)\\)\")",
+      "Bash(kill -9 21291)",
+      "Bash(pkill -f \"concurrently\")",
+      "Bash(curl -s http://localhost:3001/api/health)",
+      "Bash(curl -s -X POST http://localhost:3001/api/auth/signup -H \"Content-Type: application/json\" -d '{\"phone\":\"912345678\",\"password\":\"abc12\"}')",
+      "Bash(xargs -r kill -9)",
+      "Bash(git status -u --short | head -30)",
+      "Bash(git add -A && git status --short | head -20)",
+      "Bash(git commit -m \"$\\(cat <<'EOF'\nWIP: changes before fresh push\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git checkout --orphan fresh-main)",
+      "Bash(git add -A && git commit -m \"$\\(cat <<'EOF'\nNANTER - Aposta e Joga \\(Ludo online\\)\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}

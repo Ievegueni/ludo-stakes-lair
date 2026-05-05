@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: nanter-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nanter
+      POSTGRES_PASSWORD: nanter
+      POSTGRES_DB: nanter
+    ports:
+      - "54322:5432"
+    volumes:
+      - nanter_pg_data:/var/lib/postgresql/data
+
+volumes:
+  nanter_pg_data:
