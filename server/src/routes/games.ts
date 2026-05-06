@@ -223,4 +223,77 @@ app.patch('/:id', async (c) => {
   }
 });
 
+// --- Chat ---
+app.get('/:id/chat', async (c) => {
+  const rows = await query<any>(
+    `SELECT id, user_id, author_name, color, text, gift_emoji, gift_name, gift_price,
+            gift_to_name, gift_to_color, created_at
+     FROM chat_messages WHERE game_id = $1 ORDER BY created_at ASC LIMIT 200`,
+    [c.req.param('id')],
+  );
+  return c.json({
+    messages: rows.map((r: any) => ({
+      ...r,
+      gift_price: r.gift_price === null ? null : Number(r.gift_price),
+    })),
+  });
+});
+
+app.post('/:id/chat', async (c) => {
+  const u = c.get('user');
+  const id = c.req.param('id');
+  const body = await c.req.json<{
+    text?: string;
+    color: string;
+    author_name: string;
+    gift?: {
+      emoji: string;
+      name: string;
+      price: number;
+      toName: string;
+      toColor: string;
+    };
+  }>();
+
+  // Verify the user is part of the game
+  const game = await one<{ state: any }>(
+    'SELECT state FROM games WHERE id = $1',
+    [id],
+  );
+  if (!game) return c.json({ error: 'game not found' }, 404);
+  const inGame = game.state.players.some((p: any) => p.id === u.id);
+  if (!inGame) return c.json({ error: 'not in this game' }, 403);
+
+  if (!body.gift && !body.text?.trim()) {
+    return c.json({ error: 'empty message' }, 400);
+  }
+
+  const inserted = await one<any>(
+    `INSERT INTO chat_messages
+       (game_id, user_id, author_name, color, text,
+        gift_emoji, gift_name, gift_price, gift_to_name, gift_to_color)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING id, user_id, author_name, color, text,
+               gift_emoji, gift_name, gift_price, gift_to_name, gift_to_color, created_at`,
+    [
+      id,
+      u.id,
+      body.author_name,
+      body.color,
+      body.text ?? null,
+      body.gift?.emoji ?? null,
+      body.gift?.name ?? null,
+      body.gift?.price ?? null,
+      body.gift?.toName ?? null,
+      body.gift?.toColor ?? null,
+    ],
+  );
+  return c.json({
+    message: {
+      ...inserted,
+      gift_price: inserted?.gift_price === null ? null : Number(inserted?.gift_price),
+    },
+  });
+});
+
 export default app;

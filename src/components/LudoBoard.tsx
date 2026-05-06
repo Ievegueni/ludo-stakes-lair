@@ -121,6 +121,18 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
   const potTotal = betAmount * gameState.players.length;
 
+  // Find next non-resigned player index
+  const nextActiveIdx = useCallback((playersArr: Player[], fromIdx: number) => {
+    const total = playersArr.length;
+    for (let i = 1; i <= total; i++) {
+      const idx = (fromIdx + i) % total;
+      if (!playersArr[idx].resigned) return idx;
+    }
+    return fromIdx;
+  }, []);
+
+  const prevResignedRef = useRef<Set<string>>(new Set());
+
   const addLog = useCallback((color: PlayerColor, text: string, highlight = false) => {
     logIdRef.current++;
     setGameLog((prev) => [{ id: logIdRef.current, color, text, highlight }, ...prev].slice(0, 30));
@@ -130,6 +142,20 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     setNotification(msg);
     setTimeout(() => setNotification(null), 2500);
   }, []);
+
+  // Notify when a player resigns (visible to ALL clients via realtime sync)
+  useEffect(() => {
+    const currentResigned = new Set(
+      gameState.players.filter((p) => p.resigned).map((p) => p.id),
+    );
+    gameState.players.forEach((p) => {
+      if (p.resigned && !prevResignedRef.current.has(p.id)) {
+        showNotification(`${p.name.toUpperCase()} DESISTIU`);
+        addLog(p.color, `${p.name} desistiu do jogo`, true);
+      }
+    });
+    prevResignedRef.current = currentResigned;
+  }, [gameState.players, showNotification, addLog]);
 
   // Push state to server (multiplayer only). Caller decides when to call.
   const pushState = useCallback(async (newState: GameState) => {
@@ -184,7 +210,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       setGameState((prev) => {
         if (prev.phase === 'finished') return prev;
         if (prev.turnTimer <= 1) {
-          const next = (prev.currentPlayerIndex + 1) % prev.players.length;
+          const next = nextActiveIdx(prev.players, prev.currentPlayerIndex);
           const ns = { ...prev, currentPlayerIndex: next, turnTimer: 30, diceValue: null, phase: 'rolling' as const, consecutiveSixes: 0 };
           if (isMultiplayer) pushState(ns);
           return ns;
@@ -239,7 +265,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
           const movable = getMovablePieces(cp, finalValue);
           let ns: GameState;
           if (movable.length === 0) {
-            const next = (prev.currentPlayerIndex + 1) % prev.players.length;
+            const next = nextActiveIdx(prev.players, prev.currentPlayerIndex);
             ns = { ...prev, diceValue: finalValue, phase: 'rolling' as const, currentPlayerIndex: next, turnTimer: 30, consecutiveSixes: 0 };
           } else {
             ns = { ...prev, diceValue: finalValue, phase: 'moving' as const, turnTimer: 30 };
@@ -278,12 +304,12 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
 
     let ns: GameState;
     if (newConsecutiveSixes >= 3) {
-      const next = (newState.currentPlayerIndex + 1) % newState.players.length;
+      const next = nextActiveIdx(newState.players, newState.currentPlayerIndex);
       ns = { ...newState, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: 0 };
     } else if (gotSix || captured) {
       ns = { ...newState, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: newConsecutiveSixes };
     } else {
-      const next = (newState.currentPlayerIndex + 1) % newState.players.length;
+      const next = nextActiveIdx(newState.players, newState.currentPlayerIndex);
       ns = { ...newState, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: 0 };
     }
     setGameState(ns);
@@ -291,13 +317,9 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
   }, [gameState, onGameEnd, addLog, showNotification, isMultiplayer, isHost, myUserId, pushState]);
 
   const handleResign = useCallback(async () => {
-    // The resigning user is the one watching this client.
     const me = gameState.players.find((p) => !p.isBot && p.id === myUserId)
       || gameState.players.find((p) => !p.isBot);
-    if (!me) return;
-    const opponent = gameState.players.find((p) => p.id !== me.id) ?? gameState.players[0];
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current);
+    if (!me || me.resigned) return;
 
     if (betAmount > 0) {
       try {
@@ -312,17 +334,45 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       }
     }
 
-    addLog(me.color, `${me.name} desistiu do jogo`, true);
-    const ns: GameState = { ...gameState, winner: opponent.id, phase: 'finished' };
-    setGameState(ns);
-    if (isMultiplayer) pushState(ns);
-    onGameEnd?.(opponent.id);
+    const newPlayers = gameState.players.map((p) =>
+      p.id === me.id ? { ...p, resigned: true } : p,
+    );
+    const stillActive = newPlayers.filter((p) => !p.resigned);
+
+    let ns: GameState;
+    if (stillActive.length <= 1) {
+      // Last man standing wins (or no winner if all left somehow)
+      const winnerId = stillActive[0]?.id ?? null;
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current);
+      ns = { ...gameState, players: newPlayers, winner: winnerId, phase: 'finished' };
+      setGameState(ns);
+      if (isMultiplayer) pushState(ns);
+      if (winnerId) onGameEnd?.(winnerId);
+    } else {
+      // Game continues without me. If it was my turn, advance to next active.
+      let nextIdx = gameState.currentPlayerIndex;
+      if (newPlayers[nextIdx].resigned) {
+        nextIdx = nextActiveIdx(newPlayers, nextIdx);
+      }
+      ns = {
+        ...gameState,
+        players: newPlayers,
+        currentPlayerIndex: nextIdx,
+        diceValue: null,
+        phase: 'rolling' as const,
+        turnTimer: 30,
+        consecutiveSixes: 0,
+      };
+      setGameState(ns);
+      if (isMultiplayer) pushState(ns);
+    }
     setShowResignConfirm(false);
-  }, [gameState, onGameEnd, addLog, betAmount, onBalanceChange, myUserId, isMultiplayer, pushState]);
+  }, [gameState, onGameEnd, betAmount, onBalanceChange, myUserId, isMultiplayer, pushState, nextActiveIdx]);
 
   const nextTurn = useCallback(() => {
     setGameState((prev) => {
-      const next = (prev.currentPlayerIndex + 1) % prev.players.length;
+      const next = nextActiveIdx(prev.players, prev.currentPlayerIndex);
       const ns = { ...prev, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: 0 };
       if (isMultiplayer) pushState(ns);
       return ns;
@@ -470,11 +520,33 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         <div className="relative w-full max-w-[540px] aspect-square rounded-xl overflow-hidden border border-border/50 shadow-2xl"
           style={{ background: 'linear-gradient(135deg, rgba(30,30,30,0.9), rgba(15,15,15,0.95))' }}
         >
-          {/* Kz markers on corners */}
-          <div className="absolute top-2 left-2 bg-primary/20 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded z-10">Kz</div>
-          <div className="absolute top-2 right-2 bg-primary/20 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded z-10">Kz</div>
-          <div className="absolute bottom-2 left-2 bg-primary/20 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded z-10">Kz</div>
-          <div className="absolute bottom-2 right-2 bg-primary/20 text-primary text-[10px] font-bold px-1.5 py-0.5 rounded z-10">Kz</div>
+          {/* Player name chips on corners (matches the home base of each color) */}
+          {([
+            { pos: 'top-2 left-2', color: 'red' as PlayerColor },
+            { pos: 'top-2 right-2', color: 'blue' as PlayerColor },
+            { pos: 'bottom-2 left-2', color: 'yellow' as PlayerColor },
+            { pos: 'bottom-2 right-2', color: 'green' as PlayerColor },
+          ]).map(({ pos, color }) => {
+            const player = gameState.players.find((p) => p.color === color);
+            const isActive = player && gameState.players.indexOf(player) === gameState.currentPlayerIndex && !player.resigned;
+            const text = player ? player.name : '';
+            return (
+              <div
+                key={color}
+                className={`absolute ${pos} text-[10px] font-bold px-1.5 py-0.5 rounded z-10 max-w-[90px] truncate ${
+                  isActive ? 'ring-1 ring-white/60' : ''
+                } ${player?.resigned ? 'line-through opacity-50' : ''}`}
+                style={{
+                  backgroundColor: COLOR_BG[color],
+                  color: COLORS[color],
+                  border: `1px solid ${COLORS[color]}`,
+                }}
+                title={text}
+              >
+                {text || '—'}
+              </div>
+            );
+          })}
 
           <svg viewBox="0 0 100 100" className="w-full h-full">
             {/* Home bases — aligned with engine: red TL, blue TR, yellow BL, green BR */}
@@ -538,7 +610,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
             ))}
 
             {/* Home base pieces (position === -1) */}
-            {gameState.players.map((player) => {
+            {gameState.players.filter((pp) => !pp.resigned).map((player) => {
               const homePositions: Record<PlayerColor, [number, number][]> = {
                 red: [[2, 2], [2, 4], [4, 2], [4, 4]],
                 blue: [[2, 11], [2, 13], [4, 11], [4, 13]],
@@ -584,7 +656,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
             })}
 
             {/* Board pieces (position >= 0) */}
-            {gameState.players.map((player) =>
+            {gameState.players.filter((pp) => !pp.resigned).map((player) =>
               player.pieces
                 .filter((p) => p.position >= 0 && !p.isFinished)
                 .map((piece) => {
@@ -621,7 +693,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
             )}
 
             {/* Finished pieces in center */}
-            {gameState.players.map((player) => {
+            {gameState.players.filter((pp) => !pp.resigned).map((player) => {
               const finished = player.pieces.filter((p) => p.isFinished);
               return finished.map((piece, idx) => (
                 <circle
@@ -724,9 +796,10 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         <div className={`w-full max-w-[540px] block ${showChat ? 'lg:block' : 'lg:hidden'}`}>
           <GameChat
             players={gameState.players}
-            currentUserId={gameState.players.find((p) => !p.isBot)?.id || gameState.players[0].id}
+            currentUserId={myUserId || gameState.players.find((p) => !p.isBot)?.id || gameState.players[0].id}
             balance={balance}
             onBalanceChange={onBalanceChange}
+            gameId={multiplayer?.gameId}
           />
         </div>
       </div>

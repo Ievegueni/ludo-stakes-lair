@@ -16,6 +16,7 @@ export interface Player {
   pieces: Piece[];
   isBot: boolean;
   avatarUrl?: string;
+  resigned?: boolean;
 }
 
 export interface GameState {

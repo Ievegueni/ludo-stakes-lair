@@ -231,6 +231,28 @@ export const api = {
     },
   },
 
+  chat: {
+    async list(gameId: string) {
+      const r = await request<{ messages: any[] }>(`/api/games/${gameId}/chat`);
+      return r.messages;
+    },
+    async send(
+      gameId: string,
+      payload: {
+        author_name: string;
+        color: string;
+        text?: string;
+        gift?: { emoji: string; name: string; price: number; toName: string; toColor: string };
+      },
+    ) {
+      const r = await request<{ message: any }>(`/api/games/${gameId}/chat`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      return r.message;
+    },
+  },
+
   games: {
     async start(roomId: string) {
       const r = await request<{ game: GameRecord }>(

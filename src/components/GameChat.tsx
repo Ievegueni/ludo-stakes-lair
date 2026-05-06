@@ -66,9 +66,11 @@ interface GameChatProps {
   currentUserId: string;
   balance: number;
   onBalanceChange: (newBalance: number) => void;
+  gameId?: string;
 }
 
-export function GameChat({ players, currentUserId, balance, onBalanceChange }: GameChatProps) {
+export function GameChat({ players, currentUserId, balance, onBalanceChange, gameId }: GameChatProps) {
+  const isSync = !!gameId;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
@@ -88,10 +90,67 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange }: G
     }
   }, [messages]);
 
-  const sendMessage = (text: string) => {
+  // Sync mode: load history + subscribe realtime
+  useEffect(() => {
+    if (!isSync || !gameId) return;
+    let cancelled = false;
+
+    const mapRow = (r: any): ChatMessage => ({
+      id: r.id,
+      authorId: r.user_id ?? '',
+      authorName: r.author_name,
+      color: r.color as PlayerColor,
+      text: r.text ?? '',
+      timestamp: new Date(r.created_at).getTime(),
+      gift: r.gift_emoji
+        ? {
+            emoji: r.gift_emoji,
+            name: r.gift_name,
+            price: Number(r.gift_price),
+            toName: r.gift_to_name,
+            toColor: r.gift_to_color as PlayerColor,
+          }
+        : undefined,
+    });
+
+    api.chat.list(gameId).then((rows) => {
+      if (cancelled) return;
+      setMessages(rows.map(mapRow));
+    }).catch(() => {});
+
+    const off = api.realtime.subscribe((ev) => {
+      if (ev.table !== 'chat_messages') return;
+      if (ev.event !== 'INSERT') return;
+      if ((ev.row as any).game_id !== gameId) return;
+      const msg = mapRow(ev.row);
+      setMessages((prev) => (prev.find((m) => m.id === msg.id) ? prev : [...prev, msg]));
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [isSync, gameId]);
+
+  const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || !me) return;
 
+    if (isSync && gameId) {
+      setInput('');
+      setShowEmojis(false);
+      try {
+        await api.chat.send(gameId, {
+          author_name: me.name,
+          color: me.color,
+          text: trimmed,
+        });
+      } catch (err: any) {
+        toast.error(err?.message || 'Erro ao enviar');
+      }
+      return;
+    }
+
+    // Local mode (single player)
     const msg: ChatMessage = {
       id: `${Date.now()}-${Math.random()}`,
       authorId: me.id,
@@ -149,24 +208,40 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange }: G
       });
       onBalanceChange(r.balance);
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `${Date.now()}-${Math.random()}`,
-          authorId: me.id,
-          authorName: me.name,
-          color: me.color,
-          text: '',
-          timestamp: Date.now(),
-          gift: {
-            emoji: selectedGift.emoji,
-            name: selectedGift.name,
-            price: selectedGift.price,
-            toName: recipient.name,
-            toColor: recipient.color,
+      if (isSync && gameId) {
+        try {
+          await api.chat.send(gameId, {
+            author_name: me.name,
+            color: me.color,
+            gift: {
+              emoji: selectedGift.emoji,
+              name: selectedGift.name,
+              price: selectedGift.price,
+              toName: recipient.name,
+              toColor: recipient.color,
+            },
+          });
+        } catch {}
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-${Math.random()}`,
+            authorId: me.id,
+            authorName: me.name,
+            color: me.color,
+            text: '',
+            timestamp: Date.now(),
+            gift: {
+              emoji: selectedGift.emoji,
+              name: selectedGift.name,
+              price: selectedGift.price,
+              toName: recipient.name,
+              toColor: recipient.color,
+            },
           },
-        },
-      ]);
+        ]);
+      }
 
       setFloatingGift({ emoji: selectedGift.emoji, key: Date.now() });
       setTimeout(() => setFloatingGift(null), 2500);
