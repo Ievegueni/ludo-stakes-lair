@@ -28,7 +28,10 @@
       "Bash(kill -9 54996)",
       "Bash(kill -9 54999)",
       "Bash(disown)",
-      "Bash(curl -sI http://localhost:3001/api/health)"
+      "Bash(curl -sI http://localhost:3001/api/health)",
+      "Bash(NODE_ENV=production node --import tsx server/src/index.ts)",
+      "Bash(curl -sI http://localhost:3001/background.png)",
+      "Bash(pkill -f \"node --import tsx\")"
     ]
   }
 }

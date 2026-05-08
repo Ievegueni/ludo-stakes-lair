@@ -26,8 +26,14 @@ app.get('/api/realtime', realtimeHandler);
 
 // In production, serve static assets and SSR via TanStack Start
 if (process.env.NODE_ENV === 'production') {
+  // 1) Hashed assets (Vite build output)
   app.use('/assets/*', serveStatic({ root: './dist/client' }));
 
+  // 2) Public files copied verbatim by Vite (background.png, sounds/, animations/, favicon, etc.)
+  //    serveStatic só serve se o ficheiro existir; senão passa para o handler seguinte.
+  app.use('/*', serveStatic({ root: './dist/client' }));
+
+  // 3) SSR fallback para rotas da app
   app.get('*', async (c) => {
     // @ts-expect-error built only in production
     const mod: any = await import('../../dist/server/index.js');
