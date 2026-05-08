@@ -156,20 +156,37 @@ export function Profile() {
 
   const isCredit = (type: string) => ['deposit', 'win', 'refund'].includes(type);
 
+  const glass: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.05)',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+  };
+
   return (
-    <div className="space-y-5">
-      <div className="bg-card rounded-2xl border border-border p-5">
+    <div className="space-y-4">
+      {/* Card Avatar + Nome */}
+      <div className="rounded-2xl border border-white/10 p-5" style={glass}>
         <div className="flex flex-col items-center gap-3">
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploadingAvatar}
             className="relative group"
           >
-            <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-primary bg-secondary flex items-center justify-center">
+            <div
+              className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center"
+              style={{
+                background: avatarUrl
+                  ? '#0b0817'
+                  : 'linear-gradient(135deg, rgba(124,58,237,0.55), rgba(59,130,246,0.45))',
+                boxShadow:
+                  '0 0 0 3px rgba(251,191,36,0.55), 0 0 0 6px rgba(251,191,36,0.18), 0 8px 24px rgba(124,58,237,0.45)',
+              }}
+            >
               {avatarUrl ? (
                 <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                <User className="w-10 h-10 text-muted-foreground" />
+                <User className="w-10 h-10 text-white/85" />
               )}
             </div>
             <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -190,63 +207,79 @@ export function Profile() {
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={uploadingAvatar}
-            className="text-xs text-primary hover:underline"
+            className="text-xs font-bold uppercase tracking-wider text-amber-300 hover:text-amber-200 transition-colors"
           >
             Alterar foto
           </button>
 
           {phone && (
-            <p className="text-xs text-muted-foreground">{phone}</p>
+            <p className="text-xs text-muted-foreground font-mono">{phone}</p>
           )}
         </div>
 
         <div className="mt-5 space-y-2">
-          <label className="text-sm font-medium text-foreground">Nome de jogador</label>
+          <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            Nome de jogador
+          </label>
           <div className="flex gap-2">
             <Input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               maxLength={24}
               placeholder="O teu nome"
+              className="bg-white/5 border-white/15 backdrop-blur"
             />
-            <Button
+            <button
               onClick={handleSaveName}
               disabled={savingName || displayName.trim() === originalName || !displayName.trim()}
-              size="icon"
+              className="rounded-xl px-3 transition-transform flex items-center justify-center text-emerald-950 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:scale-[1.04] active:scale-95"
+              style={{
+                background: 'linear-gradient(180deg, #4ade80, #16a34a)',
+                boxShadow: '0 4px 12px rgba(34,197,94,0.45), inset 0 1px 0 rgba(255,255,255,0.4)',
+                minWidth: '44px',
+              }}
+              aria-label="Guardar nome"
             >
               {savingName ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Check className="w-4 h-4" />
               )}
-            </Button>
+            </button>
           </div>
         </div>
       </div>
 
-      <div className="bg-card rounded-2xl border border-border p-5">
+      {/* Card Histórico */}
+      <div className="rounded-2xl border border-white/10 p-5" style={glass}>
         <div className="flex items-center gap-2 mb-3">
           <History className="w-4 h-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold text-foreground">Histórico da Carteira</h3>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+            Histórico da Carteira
+          </h3>
         </div>
         {transactions.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-6">
+          <p className="text-sm text-muted-foreground text-center py-6 italic">
             Sem movimentos ainda
           </p>
         ) : (
-          <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+          <div className="space-y-2 max-h-[55vh] overflow-y-auto">
             {transactions.map((tx) => (
-              <div key={tx.id} className="flex items-center gap-3 bg-secondary/40 rounded-lg p-3">
+              <div
+                key={tx.id}
+                className="flex items-center gap-3 rounded-lg p-3 border border-white/5"
+                style={{ background: 'rgba(255,255,255,0.04)' }}
+              >
                 {typeIcon(tx.type)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground">{typeLabel(tx.type)}</p>
+                  <p className="text-sm font-bold text-foreground">{typeLabel(tx.type)}</p>
                   <p className="text-xs text-muted-foreground truncate">
                     {tx.description || new Date(tx.created_at).toLocaleString('pt-PT')}
                   </p>
                 </div>
                 <span
-                  className={`text-sm font-semibold ${
-                    isCredit(tx.type) ? 'text-primary' : 'text-destructive'
+                  className={`text-sm font-extrabold ${
+                    isCredit(tx.type) ? 'text-emerald-400' : 'text-rose-400'
                   }`}
                 >
                   {isCredit(tx.type) ? '+' : '-'}

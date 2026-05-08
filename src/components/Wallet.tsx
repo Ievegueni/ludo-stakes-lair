@@ -79,61 +79,111 @@ export function Wallet() {
     }
   };
 
+  const glass: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.05)',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+  };
+
   return (
     <div className="space-y-4">
-      <div className="bg-gradient-to-br from-primary/20 to-primary/5 rounded-2xl p-6 border border-primary/20">
-        <div className="flex items-center gap-2 text-primary mb-2">
+      {/* Saldo card — gradient roxo+verde com brilho lateral */}
+      <div
+        className="relative overflow-hidden rounded-2xl p-6 border border-emerald-500/25"
+        style={{
+          background:
+            'linear-gradient(135deg, rgba(20,83,45,0.45) 0%, rgba(124,58,237,0.20) 60%, rgba(34,197,94,0.10) 100%)',
+          boxShadow:
+            'inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 30px rgba(34,197,94,0.18)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+        }}
+      >
+        {/* shine sweep */}
+        <span
+          aria-hidden
+          className="absolute top-0 left-0 h-full w-1/3 pointer-events-none"
+          style={{
+            background:
+              'linear-gradient(110deg, transparent, rgba(255,255,255,0.18), transparent)',
+            animation: 'nanter-coin-shine 5s ease-in-out infinite',
+          }}
+        />
+        <div className="flex items-center gap-2 text-emerald-300 mb-2 relative z-10">
           <WalletIcon className="w-5 h-5" />
-          <span className="text-sm font-medium">Saldo</span>
+          <span className="text-xs font-extrabold uppercase tracking-wider">Saldo</span>
         </div>
-        <p className="text-3xl font-bold text-foreground">
-          {balance.toLocaleString()} <span className="text-lg text-muted-foreground">Kz</span>
+        <p className="text-4xl font-extrabold text-white relative z-10 tracking-tight">
+          {balance.toLocaleString()}{' '}
+          <span className="text-lg text-emerald-200/70 font-bold">Kz</span>
         </p>
       </div>
 
+      {/* Botões de depósito glass */}
       <div className="space-y-2">
-        <p className="text-sm font-medium text-muted-foreground">Adicionar Saldo (Simulado)</p>
+        <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+          Adicionar Saldo (Simulado)
+        </p>
         <div className="grid grid-cols-2 gap-2">
           {[1000, 5000, 10000, 50000].map((amount) => (
-            <Button
+            <button
               key={amount}
-              variant="outline"
               onClick={() => handleDeposit(amount)}
-              className="gap-2"
+              className="rounded-xl px-3 py-3 text-sm font-bold text-white transition-transform flex items-center justify-center gap-2 hover:scale-[1.03] active:scale-95"
+              style={{
+                background:
+                  'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(255,255,255,0.05))',
+                border: '1px solid rgba(34,197,94,0.30)',
+                backdropFilter: 'blur(10px)',
+                WebkitBackdropFilter: 'blur(10px)',
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.10), 0 4px 12px rgba(0,0,0,0.25)',
+              }}
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 text-emerald-300" />
               {amount.toLocaleString()} Kz
-            </Button>
+            </button>
           ))}
         </div>
       </div>
 
-      <div>
+      {/* Histórico glass colapsável */}
+      <div className="rounded-2xl p-4 border border-white/10" style={glass}>
         <button
           onClick={() => setShowHistory(!showHistory)}
-          className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-2"
+          className="flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-foreground transition-colors w-full uppercase tracking-wider"
         >
           <History className="w-4 h-4" />
-          Histórico de Transações
+          <span>Histórico de Transações</span>
+          <span className="ml-auto text-xs">{showHistory ? '▾' : '▸'}</span>
         </button>
 
         {showHistory && (
-          <div className="space-y-2 max-h-60 overflow-y-auto">
+          <div className="space-y-2 max-h-60 overflow-y-auto mt-3">
             {transactions.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
                 Nenhuma transação ainda
               </p>
             ) : (
               transactions.map((tx) => (
-                <div key={tx.id} className="flex items-center gap-3 bg-secondary/50 rounded-lg p-3">
+                <div
+                  key={tx.id}
+                  className="flex items-center gap-3 rounded-lg p-3 border border-white/5"
+                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                >
                   {typeIcon(tx.type)}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground">{typeLabel(tx.type)}</p>
+                    <p className="text-sm font-bold text-foreground">{typeLabel(tx.type)}</p>
                     <p className="text-xs text-muted-foreground truncate">{tx.description}</p>
                   </div>
-                  <span className={`text-sm font-semibold ${
-                    ['deposit', 'win', 'refund'].includes(tx.type) ? 'text-primary' : 'text-destructive'
-                  }`}>
+                  <span
+                    className={`text-sm font-extrabold ${
+                      ['deposit', 'win', 'refund'].includes(tx.type)
+                        ? 'text-emerald-400'
+                        : 'text-rose-400'
+                    }`}
+                  >
                     {['deposit', 'win', 'refund'].includes(tx.type) ? '+' : '-'}
                     {tx.amount.toLocaleString()} Kz
                   </span>

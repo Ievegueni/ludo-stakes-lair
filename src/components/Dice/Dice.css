@@ -1,0 +1,71 @@
+/* NANTER — Dado 3D em CSS puro
+ * Cubo com 6 faces SVG. Sem libs externas.
+ */
+
+.nanter-dice-scene {
+  display: inline-block;
+  perspective: 600px;
+  perspective-origin: 50% 50%;
+}
+
+.nanter-dice {
+  position: relative;
+  transform-style: preserve-3d;
+  /* A transform real é aplicada inline a partir do JS para reflectir a face actual */
+  transition: transform 0.7s cubic-bezier(0.34, 1.2, 0.4, 1);
+  will-change: transform;
+}
+
+.nanter-dice.is-rolling {
+  /* Durante o roll usamos transitions curtas para encadear "trémulos" rápidos */
+  transition: transform 0.12s linear;
+}
+
+.nanter-dice-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #fefefe 0%, #f3f4f6 100%);
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 14%;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.12),
+    inset 0 3px 6px rgba(255, 255, 255, 0.5);
+  backface-visibility: hidden;
+}
+
+.nanter-dice-pip {
+  fill: #1f2937;
+  filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.45));
+}
+
+/* Variante "dourada" — pips dourados em fundo escuro como pediste no plano */
+.nanter-dice.theme-gold .nanter-dice-face {
+  background: linear-gradient(135deg, #1f1b3a 0%, #0e0a22 100%);
+  border-color: rgba(255, 215, 0, 0.4);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 215, 0, 0.25),
+    inset 0 -3px 8px rgba(0, 0, 0, 0.55),
+    inset 0 3px 8px rgba(255, 215, 0, 0.18);
+}
+.nanter-dice.theme-gold .nanter-dice-pip {
+  fill: #ffd700;
+  filter:
+    drop-shadow(0 0 1.5px rgba(255, 215, 0, 0.85))
+    drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.4));
+}
+
+/* Sombra abaixo do dado, projectada no chão */
+.nanter-dice-shadow {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -8%;
+  height: 14%;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.45) 0%, transparent 70%);
+  filter: blur(2px);
+  pointer-events: none;
+}

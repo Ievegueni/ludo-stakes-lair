@@ -18,6 +18,7 @@ interface GamePlayer {
   name: string;
   color: string;
   isBot: boolean;
+  avatarUrl?: string | null;
   pieces: GamePiece[];
 }
 
@@ -33,7 +34,7 @@ interface GameState {
 }
 
 function buildInitialState(
-  players: Array<{ id: string; name: string; color: string; isBot: boolean }>,
+  players: Array<{ id: string; name: string; color: string; isBot: boolean; avatarUrl?: string | null }>,
 ): GameState {
   return {
     players: players.map((p) => ({
@@ -97,18 +98,20 @@ app.post('/start/:roomId', async (c) => {
       return c.json({ error: 'need at least 2 players' }, 400);
     }
 
-    // Resolve human profile names
+    // Resolve human profile names + avatar URLs
     const humanIds = playersRes.rows
       .filter((p: any) => !p.is_bot && p.user_id)
       .map((p: any) => p.user_id);
     let nameMap: Record<string, string> = {};
+    let avatarMap: Record<string, string | null> = {};
     if (humanIds.length > 0) {
-      const profRes = await client.query<{ id: string; display_name: string }>(
-        'SELECT id, display_name FROM profiles WHERE id = ANY($1::uuid[])',
+      const profRes = await client.query<{ id: string; display_name: string; avatar_url: string | null }>(
+        'SELECT id, display_name, avatar_url FROM profiles WHERE id = ANY($1::uuid[])',
         [humanIds],
       );
       profRes.rows.forEach((p) => {
         nameMap[p.id] = p.display_name;
+        avatarMap[p.id] = p.avatar_url;
       });
     }
 
@@ -119,6 +122,7 @@ app.post('/start/:roomId', async (c) => {
         : nameMap[p.user_id] || 'Jogador',
       color: p.color,
       isBot: p.is_bot,
+      avatarUrl: p.is_bot ? null : avatarMap[p.user_id] || null,
     }));
 
     const initialState = buildInitialState(gamePlayers);

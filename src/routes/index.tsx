@@ -9,8 +9,10 @@ import { Profile } from "@/components/Profile";
 import { api } from "@/lib/api";
 import { createPlayer, type PlayerColor } from "@/lib/ludo-engine";
 import { Toaster } from "sonner";
-import { LogOut, Wallet as WalletIcon, Gamepad2, User } from "lucide-react";
+import { LogOut, Wallet as WalletIcon, Gamepad2, User, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { motion } from "framer-motion";
+import { isMuted, setMuted } from "@/utils/sound";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -44,6 +46,13 @@ function Index() {
   const [multiplayer, setMultiplayer] = useState<MultiplayerInfo | null>(null);
   const [balance, setBalance] = useState(0);
   const [displayName, setDisplayName] = useState('Jogador');
+  const [muted, setMutedState] = useState<boolean>(() => isMuted());
+
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    setMutedState(next);
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -67,7 +76,7 @@ function Index() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
           <div className="text-5xl animate-bounce mb-4">🎲</div>
           <p className="text-muted-foreground">A carregar...</p>
@@ -92,7 +101,7 @@ function Index() {
     return (
       <>
         <Toaster position="top-center" richColors />
-        <div className="min-h-screen bg-background p-4 overflow-hidden">
+        <div className="min-h-screen p-4 overflow-hidden">
           <LudoBoard
             players={players}
             betAmount={gameBetAmount}
@@ -117,20 +126,55 @@ function Index() {
   return (
     <>
       <Toaster position="top-center" richColors />
-      <div className="min-h-screen bg-background">
-        {/* Header */}
-        <header className="sticky top-0 z-40 bg-card/80 backdrop-blur-lg border-b border-border">
+      <div className="min-h-screen">
+        {/* Header — gradiente vertical com fade-out (sem cor sólida) */}
+        <header
+          className="sticky top-0 z-40 backdrop-blur-md"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(11,8,23,0.85) 0%, rgba(11,8,23,0.55) 60%, rgba(11,8,23,0) 100%)',
+            borderBottom: 'none',
+          }}
+        >
           <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
             <div className="flex items-center gap-2">
-              <span className="text-2xl">🎲</span>
-              <span className="font-bold text-foreground">NANTER</span>
+              {/* Logo NANTER em SVG estilizado (cubo com pip dourado) */}
+              <span aria-hidden className="inline-flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: 'linear-gradient(135deg, #4c1d95, #1e3a8a)', boxShadow: '0 4px 14px rgba(76,29,149,0.55), inset 0 1px 0 rgba(255,255,255,0.15)' }}>
+                <svg viewBox="0 0 32 32" className="w-5 h-5">
+                  <rect x="5" y="5" width="22" height="22" rx="5" fill="#fde68a" stroke="#f59e0b" strokeWidth="1.2" />
+                  <circle cx="11" cy="11" r="2" fill="#7c2d12" />
+                  <circle cx="21" cy="21" r="2" fill="#7c2d12" />
+                  <circle cx="21" cy="11" r="1.4" fill="#f59e0b" />
+                  <circle cx="11" cy="21" r="1.4" fill="#f59e0b" />
+                </svg>
+              </span>
+              <span className="font-extrabold tracking-wider text-foreground">NANTER</span>
             </div>
             <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1 bg-primary/10 text-primary px-3 py-1.5 rounded-full">
+              <div
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-sm"
+                style={{
+                  background: 'linear-gradient(135deg, #14532d 0%, #166534 100%)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 12px rgba(34,197,94,0.25)',
+                  color: '#bbf7d0',
+                }}
+              >
                 <WalletIcon className="w-3.5 h-3.5" />
-                <span className="text-sm font-bold">{balance.toLocaleString()} Kz</span>
+                <span>{balance.toLocaleString()} Kz</span>
               </div>
-              <button onClick={signOut} className="text-muted-foreground hover:text-foreground transition-colors">
+              <button
+                onClick={toggleMute}
+                className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-full hover:bg-white/5"
+                aria-label={muted ? 'Activar som' : 'Silenciar'}
+                title={muted ? 'Activar som' : 'Silenciar'}
+              >
+                {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+              </button>
+              <button
+                onClick={signOut}
+                className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-full hover:bg-white/5"
+                aria-label="Sair"
+              >
                 <LogOut className="w-5 h-5" />
               </button>
             </div>
@@ -139,10 +183,12 @@ function Index() {
 
         {/* Content */}
         <main className="max-w-lg mx-auto px-4 py-6">
-          {/* Welcome */}
-          <div className="mb-6">
-            <h1 className="text-xl font-bold text-foreground">Olá, {displayName}! 👋</h1>
-            <p className="text-sm text-muted-foreground">Pronto para jogar?</p>
+          {/* Welcome — text-shadow para legibilidade sobre a imagem */}
+          <div className="mb-6" style={{ textShadow: '0 2px 8px rgba(0,0,0,0.85)' }}>
+            <h1 className="text-2xl font-extrabold text-white tracking-tight">
+              Olá, {displayName}! <span className="anim-float inline-block">👋</span>
+            </h1>
+            <p className="text-sm text-white/75 font-medium">Pronto para jogar?</p>
           </div>
 
           {view === 'lobby' && (
@@ -162,25 +208,43 @@ function Index() {
           {view === 'profile' && <Profile />}
         </main>
 
-        {/* Bottom nav */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-card/80 backdrop-blur-lg border-t border-border">
+        {/* Bottom nav — vidro escuro */}
+        <nav
+          className="fixed bottom-0 left-0 right-0 backdrop-blur-2xl border-t border-white/10"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(11,8,23,0.55) 0%, rgba(11,8,23,0.92) 100%)',
+            boxShadow: '0 -8px 24px rgba(0,0,0,0.45)',
+          }}
+        >
           <div className="max-w-lg mx-auto flex">
             {[
               { key: 'lobby' as const, label: 'Jogar', icon: Gamepad2 },
               { key: 'wallet' as const, label: 'Carteira', icon: WalletIcon },
               { key: 'profile' as const, label: 'Perfil', icon: User },
-            ].map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                onClick={() => setView(key)}
-                className={`flex-1 flex flex-col items-center gap-1 py-3 transition-colors ${
-                  view === key ? 'text-primary' : 'text-muted-foreground'
-                }`}
-              >
-                <Icon className="w-5 h-5" />
-                <span className="text-xs font-medium">{label}</span>
-              </button>
-            ))}
+            ].map(({ key, label, icon: Icon }) => {
+              const active = view === key;
+              return (
+                <button
+                  key={key}
+                  onClick={() => setView(key)}
+                  className={`relative flex-1 flex flex-col items-center gap-1 py-3 transition-colors ${
+                    active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="bottom-nav-indicator"
+                      className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-12 rounded-full"
+                      style={{ background: 'var(--grad-roll-btn)', boxShadow: '0 0 12px rgba(251,191,36,0.6)' }}
+                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                    />
+                  )}
+                  <Icon className="w-5 h-5" />
+                  <span className="text-xs font-semibold">{label}</span>
+                </button>
+              );
+            })}
           </div>
         </nav>
       </div>

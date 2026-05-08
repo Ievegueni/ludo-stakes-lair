@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
 import { Users, Plus, DoorOpen, Bot, Play, Copy, LogOut, Wallet } from 'lucide-react';
 import type { PlayerColor } from '@/lib/ludo-engine';
+import { PlayerAvatar } from '@/components/PlayerAvatar';
 
 const COLORS_AVAILABLE: PlayerColor[] = ['red', 'blue', 'green', 'yellow'];
 const COLOR_LABELS: Record<PlayerColor, string> = {
@@ -223,86 +224,168 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
     }
   };
 
-  // Room view
+  // Room view — vidro + acentos dourados
   if (currentRoom) {
+    const glassCard: React.CSSProperties = {
+      background: 'rgba(255,255,255,0.05)',
+      backdropFilter: 'blur(16px)',
+      WebkitBackdropFilter: 'blur(16px)',
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+    };
+
     return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="space-y-3">
+        {/* Header da sala */}
+        <div className="rounded-2xl p-4 border border-white/10 flex items-center justify-between" style={glassCard}>
           <div>
-            <h2 className="text-lg font-bold text-foreground">Sala de Espera</h2>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Sala de Espera</p>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-sm text-muted-foreground">Código:</span>
-              <span className="font-mono font-bold text-primary text-lg">{currentRoom.code}</span>
+              <span
+                className="font-mono font-extrabold text-lg tracking-[0.2em]"
+                style={{
+                  background: 'var(--grad-pot)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                }}
+              >
+                {currentRoom.code}
+              </span>
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(currentRoom.code);
                   toast.success('Código copiado!');
                 }}
-                className="text-muted-foreground hover:text-foreground transition-colors"
+                className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-md hover:bg-white/5"
+                aria-label="Copiar código"
               >
                 <Copy className="w-4 h-4" />
               </button>
             </div>
           </div>
           <div className="text-right">
-            <p className="text-sm text-muted-foreground">Aposta</p>
-            <p className="text-lg font-bold text-accent">{currentRoom.bet_amount.toLocaleString()} Kz</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Aposta</p>
+            <p
+              className="text-lg font-extrabold"
+              style={{
+                background: 'var(--grad-pot)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              {currentRoom.bet_amount.toLocaleString()} Kz
+            </p>
           </div>
         </div>
 
-        {/* Players */}
-        <div className="space-y-2">
-          {currentRoom.players.sort((a, b) => a.player_index - b.player_index).map((p) => (
-            <div key={p.id} className="flex items-center gap-3 bg-secondary/50 rounded-lg p-3">
+        {/* Players + vagas */}
+        <div className="space-y-2 rounded-2xl p-3 border border-white/10" style={glassCard}>
+          {currentRoom.players
+            .sort((a, b) => a.player_index - b.player_index)
+            .map((p) => {
+              const displayName = p.is_bot
+                ? p.bot_name || 'Bot'
+                : p.user_id === user?.id
+                  ? 'Tu'
+                  : playerNames[p.user_id!] || 'Jogador';
+              return (
+                <div
+                  key={p.id}
+                  className="flex items-center gap-3 rounded-xl p-2.5 border border-white/8"
+                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                >
+                  <PlayerAvatar
+                    name={displayName}
+                    color={p.color as PlayerColor}
+                    size={36}
+                    isBot={p.is_bot}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-foreground truncate">{displayName}</p>
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                      {COLOR_LABELS[p.color as PlayerColor]}
+                    </p>
+                  </div>
+                  {p.user_id === currentRoom.host_id && (
+                    <span
+                      className="text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider text-amber-950"
+                      style={{
+                        background: 'var(--grad-pot)',
+                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4)',
+                      }}
+                    >
+                      Anfitrião
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+
+          {/* Vagas abertas */}
+          {Array.from({
+            length: currentRoom.max_players - currentRoom.players.length,
+          }).map((_, i) => (
+            <div
+              key={`empty-${i}`}
+              className="flex items-center gap-3 rounded-xl p-2.5 border border-dashed border-white/15"
+              style={{ background: 'rgba(255,255,255,0.02)' }}
+            >
               <div
-                className="w-8 h-8 rounded-full flex items-center justify-center text-sm"
-                style={{ backgroundColor: p.color === 'red' ? '#ef4444' : p.color === 'blue' ? '#3b82f6' : p.color === 'green' ? '#22c55e' : '#eab308' }}
+                className="w-9 h-9 rounded-full flex items-center justify-center"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px dashed rgba(255,255,255,0.15)' }}
               >
-                {p.is_bot ? '🤖' : '👤'}
+                <Users className="w-4 h-4 text-muted-foreground/70" />
               </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-foreground">
-                  {p.is_bot ? p.bot_name : (p.user_id === user?.id ? 'Tu' : (playerNames[p.user_id!] || 'Jogador'))}
-                </p>
-                <p className="text-xs text-muted-foreground">{COLOR_LABELS[p.color as PlayerColor]}</p>
-              </div>
-              {p.user_id === currentRoom.host_id && (
-                <span className="text-xs bg-primary/20 text-primary px-2 py-0.5 rounded-full">Anfitrião</span>
-              )}
-            </div>
-          ))}
-
-          {/* Empty slots */}
-          {Array.from({ length: currentRoom.max_players - currentRoom.players.length }).map((_, i) => (
-            <div key={`empty-${i}`} className="flex items-center gap-3 bg-secondary/20 rounded-lg p-3 border border-dashed border-border">
-              <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                <Users className="w-4 h-4 text-muted-foreground" />
-              </div>
-              <p className="text-sm text-muted-foreground">Vaga aberta</p>
+              <p className="text-sm text-muted-foreground italic">Vaga aberta</p>
             </div>
           ))}
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2">
-          {currentRoom.host_id === user?.id && (
-            <>
-              <Button onClick={addBot} variant="outline" className="flex-1 gap-2" disabled={currentRoom.players.length >= currentRoom.max_players}>
-                <Bot className="w-4 h-4" />
-                Adicionar Bot
-              </Button>
-              <Button onClick={startGame} className="flex-1 gap-2" disabled={currentRoom.players.length < 2}>
-                <Play className="w-4 h-4" />
-                Iniciar Jogo
-              </Button>
-            </>
-          )}
-        </div>
+        {/* Actions (host) */}
+        {currentRoom.host_id === user?.id && (
+          <div className="flex gap-2">
+            <button
+              onClick={addBot}
+              disabled={currentRoom.players.length >= currentRoom.max_players}
+              className="flex-1 py-3 rounded-2xl font-bold text-sm uppercase tracking-wider transition-transform flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                color: '#fff',
+              }}
+            >
+              <Bot className="w-4 h-4" />
+              Bot
+            </button>
+            <button
+              onClick={startGame}
+              disabled={currentRoom.players.length < 2}
+              className="flex-1 py-3 rounded-2xl font-extrabold text-sm uppercase tracking-wider transition-transform flex items-center justify-center gap-2 text-amber-950 hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{
+                background: 'var(--grad-roll-btn)',
+                boxShadow: '0 6px 20px rgba(245,158,11,0.45), inset 0 1px 0 rgba(255,255,255,0.45)',
+              }}
+            >
+              <Play className="w-4 h-4" />
+              Iniciar
+            </button>
+          </div>
+        )}
 
-        <Button onClick={leaveRoom} variant="ghost" className="w-full gap-2 text-destructive hover:text-destructive">
+        <button
+          onClick={leaveRoom}
+          className="w-full py-2.5 rounded-2xl font-bold text-sm uppercase tracking-wider transition-transform flex items-center justify-center gap-2 text-destructive hover:scale-[1.02] active:scale-95"
+          style={{
+            background: 'rgba(220,38,38,0.10)',
+            border: '1px solid rgba(220,38,38,0.30)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+          }}
+        >
           <LogOut className="w-4 h-4" />
           Sair da Sala
-        </Button>
+        </button>
       </div>
     );
   }
@@ -310,116 +393,256 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
   // Lobby view
   return (
     <div className="space-y-4">
-      {/* Tabs */}
-      <div className="flex gap-1 bg-secondary rounded-lg p-1">
+      {/* Tabs — glassmorphism */}
+      <div
+        className="flex gap-1 rounded-2xl p-1 border border-white/10"
+        style={{
+          background: 'rgba(255,255,255,0.04)',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        }}
+      >
         {[
           { key: 'rooms' as const, label: 'Salas', icon: Users },
           { key: 'create' as const, label: 'Criar', icon: Plus },
           { key: 'join' as const, label: 'Código', icon: DoorOpen },
-        ].map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors ${
-              tab === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
-            }`}
-          >
-            <Icon className="w-4 h-4" />
-            {label}
-          </button>
-        ))}
+        ].map(({ key, label, icon: Icon }) => {
+          const active = tab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl text-sm font-bold transition-all ${
+                active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+              }`}
+              style={
+                active
+                  ? {
+                      background:
+                        'linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.06) 100%)',
+                      boxShadow:
+                        '0 4px 12px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.20)',
+                    }
+                  : undefined
+              }
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {tab === 'rooms' && (
         <div className="space-y-2">
           {rooms.length === 0 ? (
-            <div className="text-center py-8">
-              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">Nenhuma sala aberta</p>
-              <p className="text-sm text-muted-foreground">Cria uma sala nova!</p>
+            <div
+              className="flex flex-col items-center justify-center text-center py-10 px-6 rounded-2xl border border-white/10"
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+              }}
+            >
+              <div
+                className="w-16 h-16 rounded-full mb-3 flex items-center justify-center"
+                style={{
+                  background:
+                    'linear-gradient(135deg, rgba(124,58,237,0.35), rgba(59,130,246,0.25))',
+                  boxShadow:
+                    'inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 14px rgba(124,58,237,0.35)',
+                }}
+              >
+                <Users className="w-7 h-7 text-white/85" />
+              </div>
+              <p className="font-bold text-foreground">Nenhuma sala aberta</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Cria uma sala nova ou entra com código!
+              </p>
             </div>
           ) : (
             rooms.map((room) => (
-              <div key={room.id} className="bg-card rounded-xl border border-border p-4">
+              <div
+                key={room.id}
+                className="rounded-2xl p-4 border border-white/10 transition-transform hover:scale-[1.01]"
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  backdropFilter: 'blur(14px)',
+                  WebkitBackdropFilter: 'blur(14px)',
+                  boxShadow:
+                    'inset 0 1px 0 rgba(255,255,255,0.08), 0 6px 18px rgba(0,0,0,0.35)',
+                }}
+              >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-sm text-muted-foreground">{room.code}</span>
-                  <span className="text-sm font-bold text-accent">{room.bet_amount.toLocaleString()} Kz</span>
+                  <span className="font-mono text-sm font-bold text-foreground/90 tracking-wider">
+                    {room.code}
+                  </span>
+                  <span
+                    className="text-xs font-extrabold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: 'var(--grad-pot)',
+                      color: '#3f2a07',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.45)',
+                    }}
+                  >
+                    {room.bet_amount.toLocaleString()} Kz
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <Users className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">
+                    <span className="text-sm font-semibold text-muted-foreground">
                       {room.players.length}/{room.max_players}
                     </span>
                   </div>
-                  <Button size="sm" onClick={() => joinRoom(room.id)} disabled={room.players.length >= room.max_players}>
+                  <Button
+                    size="sm"
+                    onClick={() => joinRoom(room.id)}
+                    disabled={room.players.length >= room.max_players}
+                  >
                     Entrar
                   </Button>
                 </div>
               </div>
             ))
           )}
-          <Button variant="outline" onClick={loadRooms} className="w-full">
+          {/* Actualizar Lista — gradient dourado */}
+          <button
+            onClick={loadRooms}
+            className="w-full py-3 rounded-2xl font-extrabold uppercase tracking-wider text-amber-950 transition-transform hover:scale-[1.02] active:scale-95"
+            style={{
+              background: 'var(--grad-roll-btn)',
+              boxShadow:
+                '0 6px 20px rgba(245,158,11,0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
+            }}
+          >
             Actualizar Lista
-          </Button>
+          </button>
         </div>
       )}
 
       {tab === 'create' && (
-        <div className="space-y-4">
+        <div
+          className="space-y-4 rounded-2xl p-5 border border-white/10"
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+          }}
+        >
           <div>
-            <p className="text-sm font-medium text-foreground mb-2">Valor da Aposta</p>
+            <p className="text-sm font-bold text-foreground mb-2.5 uppercase tracking-wider">Valor da Aposta</p>
             <div className="grid grid-cols-2 gap-2">
-              {BET_AMOUNTS.map((amount) => (
-                <button
-                  key={amount}
-                  onClick={() => setSelectedBet(amount)}
-                  className={`py-3 rounded-xl border-2 text-sm font-bold transition-all ${
-                    selectedBet === amount
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-card text-foreground hover:border-primary/50'
-                  }`}
-                >
-                  {amount.toLocaleString()} Kz
-                </button>
-              ))}
+              {BET_AMOUNTS.map((amount) => {
+                const sel = selectedBet === amount;
+                return (
+                  <button
+                    key={amount}
+                    onClick={() => setSelectedBet(amount)}
+                    className="py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.02] active:scale-95"
+                    style={
+                      sel
+                        ? {
+                            background: 'var(--grad-pot)',
+                            color: '#3f2a07',
+                            boxShadow: '0 4px 14px rgba(245,158,11,0.45), inset 0 1px 0 rgba(255,255,255,0.45)',
+                          }
+                        : {
+                            background: 'rgba(255,255,255,0.05)',
+                            color: '#fff',
+                            border: '1px solid rgba(255,255,255,0.10)',
+                            backdropFilter: 'blur(8px)',
+                            WebkitBackdropFilter: 'blur(8px)',
+                          }
+                    }
+                  >
+                    {amount.toLocaleString()} Kz
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div className="bg-secondary/50 rounded-lg p-3">
-            <p className="text-xs text-muted-foreground">Prémio para o vencedor (estimado)</p>
-            <p className="text-lg font-bold text-primary">
+          <div
+            className="rounded-xl p-3 border border-amber-500/25"
+            style={{
+              background: 'linear-gradient(135deg, rgba(245,158,11,0.10), rgba(124,58,237,0.06))',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+            }}
+          >
+            <p className="text-[10px] uppercase tracking-wider text-amber-200/80 font-bold">Prémio para o vencedor</p>
+            <p
+              className="text-2xl font-extrabold"
+              style={{
+                background: 'var(--grad-pot)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
               {Math.floor(selectedBet * 4 * 0.95).toLocaleString()} Kz
             </p>
-            <p className="text-xs text-muted-foreground">4 jogadores × {selectedBet.toLocaleString()} Kz - 5% taxa</p>
+            <p className="text-[11px] text-muted-foreground">
+              4 jogadores × {selectedBet.toLocaleString()} Kz · 5% taxa
+            </p>
           </div>
 
-          <Button onClick={createRoom} className="w-full gap-2" disabled={balance < selectedBet}>
+          <button
+            onClick={createRoom}
+            disabled={balance < selectedBet}
+            className="w-full py-3 rounded-2xl font-extrabold uppercase tracking-wider text-amber-950 transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95"
+            style={{
+              background: 'var(--grad-roll-btn)',
+              boxShadow: '0 6px 20px rgba(245,158,11,0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
+            }}
+          >
             <Plus className="w-4 h-4" />
             Criar Sala
-          </Button>
+          </button>
           {balance < selectedBet && (
-            <p className="text-xs text-destructive text-center">Saldo insuficiente. Adiciona fundos na carteira.</p>
+            <p className="text-xs text-destructive text-center font-bold">
+              Saldo insuficiente. Adiciona fundos na carteira.
+            </p>
           )}
         </div>
       )}
 
       {tab === 'join' && (
-        <div className="space-y-4">
+        <div
+          className="space-y-4 rounded-2xl p-5 border border-white/10"
+          style={{
+            background: 'rgba(255,255,255,0.04)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+          }}
+        >
           <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Código da Sala</label>
+            <label className="text-sm font-bold text-foreground uppercase tracking-wider">
+              Código da Sala
+            </label>
             <Input
               placeholder="Ex: ABC123"
               value={joinCode}
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              className="text-center font-mono text-lg tracking-widest"
+              className="text-center font-mono text-lg tracking-[0.4em] font-bold bg-white/5 border-white/15 backdrop-blur"
               maxLength={6}
             />
           </div>
-          <Button onClick={joinByCode} className="w-full gap-2">
+          <button
+            onClick={joinByCode}
+            className="w-full py-3 rounded-2xl font-extrabold uppercase tracking-wider text-amber-950 transition-transform flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95"
+            style={{
+              background: 'var(--grad-roll-btn)',
+              boxShadow: '0 6px 20px rgba(245,158,11,0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
+            }}
+          >
             <DoorOpen className="w-4 h-4" />
             Entrar na Sala
-          </Button>
+          </button>
         </div>
       )}
     </div>

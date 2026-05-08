@@ -20,7 +20,15 @@
       "Bash(curl -s http://localhost:3001/api/health)",
       "Bash(curl -s -X POST http://localhost:3001/api/auth/signup -H \"Content-Type: application/json\" -d '{\"phone\":\"912345678\",\"password\":\"abc12\"}')",
       "Bash(xargs -r kill -9)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(npm install)",
+      "Bash(curl -sI http://localhost:8080/background.png)",
+      "Bash(ls /Users/ieveguenisantos/Desktop/Empresas/Futurix/Projectos/NANTER/ludo-stakes-lair/.claude 2>/dev/null || mkdir -p /Users/ieveguenisantos/Desktop/Empresas/Futurix/Projectos/NANTER/ludo-stakes-lair/.claude && echo done)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(kill -9 54996)",
+      "Bash(kill -9 54999)",
+      "Bash(disown)",
+      "Bash(curl -sI http://localhost:3001/api/health)"
     ]
   }
 }

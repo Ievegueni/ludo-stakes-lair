@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { MessageCircle, Send, Smile, Gift, X, Wallet as WalletIcon } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
+import { playSound } from '@/utils/sound';
 import type { Player, PlayerColor } from '@/lib/ludo-engine';
 
 const COLORS: Record<PlayerColor, string> = {
@@ -123,7 +124,14 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
       if (ev.event !== 'INSERT') return;
       if ((ev.row as any).game_id !== gameId) return;
       const msg = mapRow(ev.row);
-      setMessages((prev) => (prev.find((m) => m.id === msg.id) ? prev : [...prev, msg]));
+      setMessages((prev) => {
+        if (prev.find((m) => m.id === msg.id)) return prev;
+        // Tocar som apenas se a mensagem é de outro jogador
+        if (msg.authorId !== currentUserId) {
+          playSound(msg.gift ? 'gift-received' : 'chat-message');
+        }
+        return [...prev, msg];
+      });
     });
     return () => {
       cancelled = true;

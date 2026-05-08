@@ -12,9 +12,14 @@ import {
   START_POSITIONS,
   SAFE_POSITIONS,
 } from '@/lib/ludo-engine';
-import { Dice1, Dice2, Dice3, Dice4, Dice5, Dice6, MessageSquare, Settings, Trophy, Flag } from 'lucide-react';
+import { MessageSquare, Settings, Trophy, Flag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GameChat } from '@/components/GameChat';
+import { GamePiece, type PieceState } from '@/components/Pieces/GamePiece';
+import { Dice } from '@/components/Dice/Dice';
+import { PlayerAvatar } from '@/components/PlayerAvatar';
+import { VictoryModal } from '@/components/Victory/VictoryModal';
+import { playSound } from '@/utils/sound';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -48,19 +53,6 @@ const PIECE_PREFIX: Record<PlayerColor, string> = {
 
 const BOARD_PATH = generateBoardPath();
 const HOME_STRETCH = generateHomeStretch();
-
-const DiceIcon = ({ value, className = 'w-8 h-8' }: { value: number; className?: string }) => {
-  const props = { className };
-  switch (value) {
-    case 1: return <Dice1 {...props} />;
-    case 2: return <Dice2 {...props} />;
-    case 3: return <Dice3 {...props} />;
-    case 4: return <Dice4 {...props} />;
-    case 5: return <Dice5 {...props} />;
-    case 6: return <Dice6 {...props} />;
-    default: return <Dice1 {...props} />;
-  }
-};
 
 interface LogEntry {
   id: number;
@@ -157,6 +149,55 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     prevResignedRef.current = currentResigned;
   }, [gameState.players, showNotification, addLog]);
 
+  // Sound effects — derivados do diff de gameState (funciona em multiplayer
+  // porque o estado sincroniza via SSE). Cada cliente toca os seus próprios
+  // sons quando detecta um roll, move, captura ou tick do timer.
+  const prevStateRef = useRef<GameState | null>(null);
+  useEffect(() => {
+    const prev = prevStateRef.current;
+    prevStateRef.current = gameState;
+    if (!prev) return;
+
+    // 1) Dice rolled (diceValue null → number)
+    if (prev.diceValue == null && gameState.diceValue != null) {
+      playSound('dice-roll');
+    }
+
+    // 2) Piece moved + capture detection
+    let captured = false;
+    let moved = false;
+    for (let pi = 0; pi < gameState.players.length; pi++) {
+      const p1 = prev.players[pi];
+      const p2 = gameState.players[pi];
+      if (!p1 || !p2) continue;
+      for (let i = 0; i < p2.pieces.length; i++) {
+        const pos1 = p1.pieces[i]?.position;
+        const pos2 = p2.pieces[i]?.position;
+        if (pos1 !== pos2) {
+          moved = true;
+          // Capture: piece was active on track (>=0 && <52) and is now back to home (-1)
+          if (pos1 !== undefined && pos1 >= 0 && pos1 < 52 && pos2 === -1) {
+            captured = true;
+          }
+        }
+      }
+    }
+    if (captured) {
+      playSound('piece-capture');
+    } else if (moved) {
+      playSound('piece-move');
+    }
+
+    // 3) Timer tick — só nos últimos 5s
+    if (
+      gameState.turnTimer > 0 &&
+      gameState.turnTimer <= 5 &&
+      gameState.turnTimer < prev.turnTimer
+    ) {
+      playSound('timer-tick');
+    }
+  }, [gameState]);
+
   // Push state to server (multiplayer only). Caller decides when to call.
   const pushState = useCallback(async (newState: GameState) => {
     if (!isMultiplayer || !multiplayer) return;
@@ -250,14 +291,20 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     if (isMultiplayer && cur && !cur.isBot && cur.id !== myUserId) return;
     if (isMultiplayer && cur?.isBot && !isHost) return;
 
+    // Pré-determinar o valor final ANTES da animação para evitar dessincronia
+    // entre o que o utilizador vê no dado e o valor que o engine usa.
+    const finalValue = rollDice();
     setAnimatingDice(true);
     let count = 0;
     const animInterval = setInterval(() => {
-      setGameState((prev) => ({ ...prev, diceValue: rollDice() }));
       count++;
+      // Durante a animação mostra valores aleatórios que NÃO são o final;
+      // no último frame fixa o `finalValue` para o utilizador ver o que o
+      // engine vai realmente aplicar.
+      const intermediate = count > 8 ? finalValue : rollDice();
+      setGameState((prev) => ({ ...prev, diceValue: intermediate }));
       if (count > 8) {
         clearInterval(animInterval);
-        const finalValue = rollDice();
         setAnimatingDice(false);
         setGameState((prev) => {
           const cp = prev.players[prev.currentPlayerIndex];
@@ -275,7 +322,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         });
       }
     }, 100);
-  }, [gameState.phase, gameState.players, gameState.currentPlayerIndex, addLog, isMultiplayer, isHost, myUserId, pushState]);
+  }, [gameState.phase, gameState.players, gameState.currentPlayerIndex, addLog, isMultiplayer, isHost, myUserId, pushState, nextActiveIdx]);
 
   const handleMovePiece = useCallback((pieceId: number) => {
     if (gameState.phase !== 'moving' || !gameState.diceValue) return;
@@ -414,43 +461,53 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
 
       {/* MOBILE compact header (players row + pot) */}
       <div className="flex lg:hidden gap-2 items-stretch">
-        <div className="flex-1 bg-card rounded-xl border border-border p-2 overflow-x-auto">
+        <div className="flex-1 bg-card/70 backdrop-blur rounded-xl border border-white/5 p-2 overflow-x-auto shadow-lg">
           <div className="flex gap-2">
             {gameState.players.map((p, i) => {
-              const isActive = i === gameState.currentPlayerIndex;
+              const isActive = i === gameState.currentPlayerIndex && !p.resigned;
               const finishedCount = p.pieces.filter((pc) => pc.isFinished).length;
               return (
                 <div
                   key={p.id}
-                  className={`flex items-center gap-1.5 px-2 py-1 rounded-lg shrink-0 transition-all ${
-                    isActive ? 'bg-secondary' : 'opacity-60'
+                  className={`flex items-center gap-2 px-2 py-1 rounded-xl shrink-0 transition-all ${
+                    isActive ? 'bg-secondary/80 scale-[1.02]' : 'opacity-65'
                   }`}
-                  style={{
-                    border: `1.5px solid ${isActive ? COLORS[p.color] : 'transparent'}`,
-                  }}
                 >
-                  <span
-                    className="w-2.5 h-2.5 rounded-full"
-                    style={{ backgroundColor: COLORS[p.color] }}
+                  <PlayerAvatar
+                    name={p.name}
+                    color={p.color}
+                    avatarUrl={p.avatarUrl}
+                    size={28}
+                    isActive={isActive}
+                    isBot={p.isBot}
+                    resigned={p.resigned}
                   />
-                  <span
-                    className="text-[11px] font-bold truncate max-w-[70px]"
-                    style={{ color: COLORS[p.color] }}
-                  >
-                    {p.name}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {finishedCount}/4
-                  </span>
+                  <div className="flex flex-col leading-tight">
+                    <span
+                      className="text-[11px] font-bold truncate max-w-[80px]"
+                      style={{ color: COLORS[p.color] }}
+                    >
+                      {p.name}
+                    </span>
+                    <span className="text-[9px] text-muted-foreground">
+                      {finishedCount}/4 chegadas
+                    </span>
+                  </div>
                 </div>
               );
             })}
           </div>
         </div>
         {betAmount > 0 && (
-          <div className="bg-card rounded-xl border border-border px-3 py-2 flex flex-col items-center justify-center shrink-0">
-            <span className="text-[9px] text-muted-foreground uppercase tracking-wider">Pot</span>
-            <span className="text-sm font-bold text-primary leading-tight">
+          <div
+            className="rounded-xl px-3 py-2 flex flex-col items-center justify-center shrink-0 shadow-lg"
+            style={{
+              background: 'var(--grad-pot)',
+              boxShadow: '0 4px 14px rgba(245,158,11,0.35), inset 0 1px 0 rgba(255,255,255,0.4)',
+            }}
+          >
+            <span className="text-[9px] uppercase tracking-wider font-bold text-amber-950/80">Pot</span>
+            <span className="text-sm font-extrabold text-amber-950 leading-tight">
               {potTotal.toLocaleString()} Kz
             </span>
           </div>
@@ -466,33 +523,39 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
           </div>
           <div className="space-y-2">
             {gameState.players.map((p, i) => {
-              const isActive = i === gameState.currentPlayerIndex;
+              const isActive = i === gameState.currentPlayerIndex && !p.resigned;
               const pieceDots = p.pieces.map((pc) => pc.isFinished ? 'finished' : pc.position >= 0 ? 'out' : 'home');
               return (
                 <div
                   key={p.id}
-                  className={`flex items-center gap-2 p-2 rounded-lg transition-all ${
-                    isActive ? 'ring-2 bg-card shadow-lg' : 'opacity-70'
+                  className={`flex items-center gap-3 p-2 rounded-lg transition-all ${
+                    isActive ? 'bg-secondary/60 shadow-md' : 'opacity-70'
                   }`}
-                  style={{ borderColor: isActive ? COLORS[p.color] : 'transparent' }}
                 >
-                  <div
-                    className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold border-2"
-                    style={{ backgroundColor: COLOR_BG[p.color], borderColor: COLORS[p.color], color: COLORS[p.color] }}
-                  >
-                    {p.isBot ? '🤖' : '👤'}
-                  </div>
+                  <PlayerAvatar
+                    name={p.name}
+                    color={p.color}
+                    avatarUrl={p.avatarUrl}
+                    size={36}
+                    isActive={isActive}
+                    isBot={p.isBot}
+                    resigned={p.resigned}
+                  />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-bold truncate" style={{ color: COLORS[p.color] }}>
-                      {p.name.toUpperCase()} ({COLOR_LABELS[p.color]})
+                      {p.name.toUpperCase()}
                     </p>
-                    <div className="flex gap-1 mt-0.5">
+                    <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                      {COLOR_LABELS[p.color]}{p.resigned ? ' · DESISTIU' : ''}
+                    </p>
+                    <div className="flex gap-1 mt-1">
                       {pieceDots.map((s, di) => (
                         <div
                           key={di}
-                          className="w-2 h-2 rounded-full"
+                          className="w-2 h-2 rounded-full transition-colors"
                           style={{
-                            backgroundColor: s === 'finished' ? '#fff' : s === 'out' ? COLORS[p.color] : 'rgba(255,255,255,0.2)',
+                            backgroundColor: s === 'finished' ? '#fde68a' : s === 'out' ? COLORS[p.color] : 'rgba(255,255,255,0.18)',
+                            boxShadow: s === 'finished' ? '0 0 4px rgba(253,230,138,0.7)' : 'none',
                           }}
                         />
                       ))}
@@ -517,10 +580,15 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       {/* CENTER - Board + Dice */}
       <div className="flex-1 flex flex-col items-center gap-3 min-w-0 w-full">
         {/* Board */}
-        <div className="relative w-full max-w-[540px] aspect-square rounded-xl overflow-hidden border border-border/50 shadow-2xl"
-          style={{ background: 'linear-gradient(135deg, rgba(30,30,30,0.9), rgba(15,15,15,0.95))' }}
+        <div
+          className="relative w-full max-w-[540px] aspect-square rounded-2xl overflow-hidden"
+          style={{
+            background: 'var(--grad-board)',
+            boxShadow:
+              'inset 0 2px 6px rgba(0,0,0,0.55), inset 0 -2px 6px rgba(255,255,255,0.04), 0 24px 60px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.06)',
+          }}
         >
-          {/* Player name chips on corners (matches the home base of each color) */}
+          {/* Player chips on corners — avatar + nome (matches the home base of each color) */}
           {([
             { pos: 'top-2 left-2', color: 'red' as PlayerColor },
             { pos: 'top-2 right-2', color: 'blue' as PlayerColor },
@@ -528,251 +596,436 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
             { pos: 'bottom-2 right-2', color: 'green' as PlayerColor },
           ]).map(({ pos, color }) => {
             const player = gameState.players.find((p) => p.color === color);
-            const isActive = player && gameState.players.indexOf(player) === gameState.currentPlayerIndex && !player.resigned;
-            const text = player ? player.name : '';
+            const isActive = !!(
+              player &&
+              gameState.players.indexOf(player) === gameState.currentPlayerIndex &&
+              !player.resigned
+            );
             return (
               <div
                 key={color}
-                className={`absolute ${pos} text-[10px] font-bold px-1.5 py-0.5 rounded z-10 max-w-[90px] truncate ${
-                  isActive ? 'ring-1 ring-white/60' : ''
-                } ${player?.resigned ? 'line-through opacity-50' : ''}`}
+                className={`absolute ${pos} z-10 flex items-center gap-1.5 px-1.5 py-1 rounded-full max-w-[110px] backdrop-blur ${
+                  player?.resigned ? 'opacity-50' : ''
+                }`}
                 style={{
-                  backgroundColor: COLOR_BG[color],
-                  color: COLORS[color],
-                  border: `1px solid ${COLORS[color]}`,
+                  background: 'rgba(0,0,0,0.55)',
+                  border: `1px solid ${COLORS[color]}aa`,
+                  boxShadow: isActive
+                    ? `0 0 10px ${COLORS[color]}cc, inset 0 0 0 1px rgba(255,255,255,0.15)`
+                    : 'inset 0 0 0 1px rgba(255,255,255,0.05)',
                 }}
-                title={text}
+                title={player?.name || ''}
               >
-                {text || '—'}
+                {player ? (
+                  <>
+                    <PlayerAvatar
+                      name={player.name}
+                      color={player.color}
+                      avatarUrl={player.avatarUrl}
+                      size={20}
+                      isActive={isActive}
+                      isBot={player.isBot}
+                      resigned={player.resigned}
+                    />
+                    <span
+                      className={`text-[10px] font-bold truncate ${
+                        player.resigned ? 'line-through' : ''
+                      }`}
+                      style={{ color: COLORS[color] }}
+                    >
+                      {player.name}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-white/40 px-1">—</span>
+                )}
               </div>
             );
           })}
 
           <svg viewBox="0 0 100 100" className="w-full h-full">
-            {/* Home bases — aligned with engine: red TL, blue TR, yellow BL, green BR */}
-            {/* Red (top-left) */}
-            <rect x={0.5 * cellSize} y={0.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="1.5" fill={COLOR_BG.red} stroke={COLORS.red} strokeWidth="0.4" />
-            {/* Blue (top-right) */}
-            <rect x={9.5 * cellSize} y={0.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="1.5" fill={COLOR_BG.blue} stroke={COLORS.blue} strokeWidth="0.4" />
-            {/* Yellow (bottom-left) */}
-            <rect x={0.5 * cellSize} y={9.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="1.5" fill={COLOR_BG.yellow} stroke={COLORS.yellow} strokeWidth="0.4" />
-            {/* Green (bottom-right) */}
-            <rect x={9.5 * cellSize} y={9.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="1.5" fill={COLOR_BG.green} stroke={COLORS.green} strokeWidth="0.4" />
+            <defs>
+              {/* Per-color gradients for home bases (radial, lighter at center) */}
+              <radialGradient id="g-home-red" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stopColor="#ef4444" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#7f1d1d" stopOpacity="0.85" />
+              </radialGradient>
+              <radialGradient id="g-home-blue" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#1e3a8a" stopOpacity="0.85" />
+              </radialGradient>
+              <radialGradient id="g-home-yellow" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stopColor="#facc15" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#854d0e" stopOpacity="0.85" />
+              </radialGradient>
+              <radialGradient id="g-home-green" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stopColor="#22c55e" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#14532d" stopOpacity="0.85" />
+              </radialGradient>
 
-            {/* Center trophy */}
-            <rect x={6 * cellSize} y={6 * cellSize} width={3 * cellSize} height={3 * cellSize} rx="1" fill="rgba(234,179,8,0.15)" stroke="rgba(234,179,8,0.3)" strokeWidth="0.3" />
-            <text x={7.5 * cellSize} y={7.5 * cellSize + 2} textAnchor="middle" fontSize="5" fill="rgba(234,179,8,0.7)">🏆</text>
+              {/* Inner pad of home base (where pieces sit) */}
+              <radialGradient id="g-home-pad" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stopColor="rgba(0,0,0,0.55)" />
+                <stop offset="100%" stopColor="rgba(0,0,0,0.78)" />
+              </radialGradient>
+
+              {/* Center "trophy" gold gradient */}
+              <radialGradient id="g-center-gold" cx="50%" cy="50%" r="60%">
+                <stop offset="0%" stopColor="#fde68a" stopOpacity="0.85" />
+                <stop offset="55%" stopColor="#f59e0b" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="#78350f" stopOpacity="0.55" />
+              </radialGradient>
+
+              {/* Star glow filter */}
+              <filter id="f-star-glow" x="-100%" y="-100%" width="300%" height="300%">
+                <feGaussianBlur stdDeviation="0.6" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+
+              {/* Per-color piece gradients (radial, light → base → dark) */}
+              <radialGradient id="g-piece-red" cx="35%" cy="30%" r="65%">
+                <stop offset="0%" stopColor="#fecaca" />
+                <stop offset="55%" stopColor="#ef4444" />
+                <stop offset="100%" stopColor="#7f1d1d" />
+              </radialGradient>
+              <radialGradient id="g-piece-blue" cx="35%" cy="30%" r="65%">
+                <stop offset="0%" stopColor="#bfdbfe" />
+                <stop offset="55%" stopColor="#3b82f6" />
+                <stop offset="100%" stopColor="#1e3a8a" />
+              </radialGradient>
+              <radialGradient id="g-piece-yellow" cx="35%" cy="30%" r="65%">
+                <stop offset="0%" stopColor="#fef3c7" />
+                <stop offset="55%" stopColor="#facc15" />
+                <stop offset="100%" stopColor="#854d0e" />
+              </radialGradient>
+              <radialGradient id="g-piece-green" cx="35%" cy="30%" r="65%">
+                <stop offset="0%" stopColor="#bbf7d0" />
+                <stop offset="55%" stopColor="#22c55e" />
+                <stop offset="100%" stopColor="#14532d" />
+              </radialGradient>
+
+              {/* Subtle inner-shadow for board */}
+              <filter id="f-inner-shadow">
+                <feGaussianBlur in="SourceAlpha" stdDeviation="1.2" />
+                <feOffset dx="0" dy="0.6" result="offsetblur" />
+                <feFlood floodColor="#000" floodOpacity="0.65" />
+                <feComposite in2="offsetblur" operator="in" />
+                <feComposite in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="inner" />
+                <feMerge>
+                  <feMergeNode in="SourceGraphic" />
+                  <feMergeNode in="inner" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            {/* Outer board surface — soft inner shadow vinette */}
+            <rect x="0.2" y="0.2" width="99.6" height="99.6" rx="3.5" fill="rgba(255,255,255,0.025)" stroke="rgba(255,255,255,0.08)" strokeWidth="0.18" />
+
+            {/* Home bases with radial gradients + inner pad */}
+            {/* Red (top-left) */}
+            <rect x={0.5 * cellSize} y={0.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="2" fill="url(#g-home-red)" stroke={COLORS.red} strokeWidth="0.45" />
+            <rect x={1.5 * cellSize} y={1.5 * cellSize} width={3 * cellSize} height={3 * cellSize} rx="1.4" fill="url(#g-home-pad)" stroke="rgba(0,0,0,0.4)" strokeWidth="0.18" />
+            {/* Blue (top-right) */}
+            <rect x={9.5 * cellSize} y={0.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="2" fill="url(#g-home-blue)" stroke={COLORS.blue} strokeWidth="0.45" />
+            <rect x={10.5 * cellSize} y={1.5 * cellSize} width={3 * cellSize} height={3 * cellSize} rx="1.4" fill="url(#g-home-pad)" stroke="rgba(0,0,0,0.4)" strokeWidth="0.18" />
+            {/* Yellow (bottom-left) */}
+            <rect x={0.5 * cellSize} y={9.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="2" fill="url(#g-home-yellow)" stroke={COLORS.yellow} strokeWidth="0.45" />
+            <rect x={1.5 * cellSize} y={10.5 * cellSize} width={3 * cellSize} height={3 * cellSize} rx="1.4" fill="url(#g-home-pad)" stroke="rgba(0,0,0,0.4)" strokeWidth="0.18" />
+            {/* Green (bottom-right) */}
+            <rect x={9.5 * cellSize} y={9.5 * cellSize} width={5 * cellSize} height={5 * cellSize} rx="2" fill="url(#g-home-green)" stroke={COLORS.green} strokeWidth="0.45" />
+            <rect x={10.5 * cellSize} y={10.5 * cellSize} width={3 * cellSize} height={3 * cellSize} rx="1.4" fill="url(#g-home-pad)" stroke="rgba(0,0,0,0.4)" strokeWidth="0.18" />
+
+            {/* Center "trophy" zone — gold gradient diamond */}
+            <polygon
+              points={`${7.5 * cellSize},${6 * cellSize} ${9 * cellSize},${7.5 * cellSize} ${7.5 * cellSize},${9 * cellSize} ${6 * cellSize},${7.5 * cellSize}`}
+              fill="url(#g-center-gold)"
+              stroke="#f59e0b"
+              strokeWidth="0.25"
+              strokeOpacity="0.5"
+            />
+            {/* Trophy emoji slightly bigger and centered */}
+            <text x={7.5 * cellSize} y={7.5 * cellSize + 2.2} textAnchor="middle" fontSize="6" style={{ filter: 'drop-shadow(0 0 1.5px rgba(251,191,36,0.7))' }}>🏆</text>
 
             {/* Path cells */}
-            {BOARD_PATH.map((cell, i) => (
-              <rect
-                key={`path-${i}`}
-                x={cell.col * cellSize + 0.2}
-                y={cell.row * cellSize + 0.2}
-                width={cellSize - 0.4}
-                height={cellSize - 0.4}
-                rx="0.4"
-                fill={cell.type === 'safe' ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.05)'}
-                stroke="rgba(255,255,255,0.08)"
-                strokeWidth="0.15"
-              />
-            ))}
+            {BOARD_PATH.map((cell, i) => {
+              const isStart = SAFE_POSITIONS.slice(0, 4).includes(cell.absolutePosition!) && [0, 13, 26, 39].includes(cell.absolutePosition!);
+              const startColor = cell.absolutePosition === 0 ? COLORS.red
+                : cell.absolutePosition === 13 ? COLORS.blue
+                : cell.absolutePosition === 26 ? COLORS.green
+                : cell.absolutePosition === 39 ? COLORS.yellow
+                : null;
+              return (
+                <rect
+                  key={`path-${i}`}
+                  x={cell.col * cellSize + 0.18}
+                  y={cell.row * cellSize + 0.18}
+                  width={cellSize - 0.36}
+                  height={cellSize - 0.36}
+                  rx="0.5"
+                  fill={isStart && startColor ? `${startColor}33` : cell.type === 'safe' ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)'}
+                  stroke={isStart && startColor ? `${startColor}88` : 'rgba(255,255,255,0.08)'}
+                  strokeWidth="0.18"
+                />
+              );
+            })}
 
-            {/* Star on safe spots */}
-            {BOARD_PATH.filter((c) => c.type === 'safe').map((cell, i) => (
-              <text
-                key={`safe-${i}`}
-                x={cell.col * cellSize + cellSize / 2}
-                y={cell.row * cellSize + cellSize / 2 + 1.2}
-                textAnchor="middle"
-                fontSize="3"
-                fill="rgba(234,179,8,0.6)"
-              >
-                ☆
-              </text>
-            ))}
+            {/* Stars on safe spots (NOT start cells — those get a globe) */}
+            {BOARD_PATH.filter((c) => c.type === 'safe' && ![0, 13, 26, 39].includes(c.absolutePosition!)).map((cell, i) => {
+              const cx = cell.col * cellSize + cellSize / 2;
+              const cy = cell.row * cellSize + cellSize / 2;
+              const r = 1.4;
+              // 5-point star polygon
+              const pts: string[] = [];
+              for (let k = 0; k < 10; k++) {
+                const angle = (Math.PI / 5) * k - Math.PI / 2;
+                const rr = k % 2 === 0 ? r : r * 0.45;
+                pts.push(`${cx + Math.cos(angle) * rr},${cy + Math.sin(angle) * rr}`);
+              }
+              return (
+                <polygon
+                  key={`safe-${i}`}
+                  points={pts.join(' ')}
+                  fill="#fde68a"
+                  stroke="#f59e0b"
+                  strokeWidth="0.18"
+                  filter="url(#f-star-glow)"
+                  opacity="0.85"
+                />
+              );
+            })}
 
-            {/* Home stretch cells */}
+            {/* Globe markers on the 4 start cells */}
+            {BOARD_PATH.filter((c) => [0, 13, 26, 39].includes(c.absolutePosition!)).map((cell, i) => {
+              const cx = cell.col * cellSize + cellSize / 2;
+              const cy = cell.row * cellSize + cellSize / 2;
+              const startColor = cell.absolutePosition === 0 ? COLORS.red
+                : cell.absolutePosition === 13 ? COLORS.blue
+                : cell.absolutePosition === 26 ? COLORS.green
+                : COLORS.yellow;
+              return (
+                <g key={`globe-${i}`} opacity="0.9">
+                  <circle cx={cx} cy={cy} r={1.6} fill="rgba(255,255,255,0.95)" stroke={startColor} strokeWidth="0.25" />
+                  <ellipse cx={cx} cy={cy} rx="1.6" ry="0.55" fill="none" stroke={startColor} strokeWidth="0.18" />
+                  <line x1={cx - 1.6} y1={cy} x2={cx + 1.6} y2={cy} stroke={startColor} strokeWidth="0.16" />
+                  <line x1={cx} y1={cy - 1.6} x2={cx} y2={cy + 1.6} stroke={startColor} strokeWidth="0.16" />
+                </g>
+              );
+            })}
+
+            {/* Home stretch cells — gradient towards the center */}
             {HOME_STRETCH.map((cell, i) => (
               <rect
                 key={`hs-${i}`}
-                x={cell.col * cellSize + 0.2}
-                y={cell.row * cellSize + 0.2}
-                width={cellSize - 0.4}
-                height={cellSize - 0.4}
-                rx="0.4"
+                x={cell.col * cellSize + 0.18}
+                y={cell.row * cellSize + 0.18}
+                width={cellSize - 0.36}
+                height={cellSize - 0.36}
+                rx="0.5"
                 fill={COLORS[cell.homeStretchColor!]}
-                opacity="0.25"
+                opacity={0.18 + (cell.homeStretchIndex || 0) * 0.07}
                 stroke={COLORS[cell.homeStretchColor!]}
-                strokeWidth="0.15"
-                strokeOpacity="0.4"
+                strokeWidth="0.18"
+                strokeOpacity="0.5"
               />
             ))}
 
-            {/* Home base pieces (position === -1) */}
-            {gameState.players.filter((pp) => !pp.resigned).map((player) => {
+            {/* Unified piece rendering — single GamePiece per (player, piece)
+                with stable key so Framer Motion animates moves between
+                home / track / home-stretch / finished positions. */}
+            {(() => {
               const homePositions: Record<PlayerColor, [number, number][]> = {
                 red: [[2, 2], [2, 4], [4, 2], [4, 4]],
                 blue: [[2, 11], [2, 13], [4, 11], [4, 13]],
                 yellow: [[11, 2], [11, 4], [13, 2], [13, 4]],
                 green: [[11, 11], [11, 13], [13, 11], [13, 13]],
               };
+              return gameState.players
+                .filter((pp) => !pp.resigned)
+                .flatMap((player) =>
+                  player.pieces.map((piece) => {
+                    let cx: number, cy: number, r: number;
+                    if (piece.isFinished) {
+                      // Stack finished pieces in the center (ordered by id)
+                      cx = 7.5 * cellSize + (piece.id - 1.5) * 1.5;
+                      cy = 7.5 * cellSize;
+                      r = cellSize / 4;
+                    } else if (piece.position === -1) {
+                      // In home base (4 slots per color)
+                      const [row, col] = homePositions[player.color][piece.id] || homePositions[player.color][0];
+                      cx = col * cellSize + cellSize / 2;
+                      cy = row * cellSize + cellSize / 2;
+                      r = cellSize / 2.5;
+                    } else {
+                      const pos = getPieceScreenPos(piece);
+                      if (!pos) return null;
+                      cx = pos.x;
+                      cy = pos.y;
+                      r = cellSize / 2.8;
+                    }
 
-              return player.pieces
-                .filter((p) => p.position === -1 && !p.isFinished)
-                .map((piece, idx) => {
-                  const positions = homePositions[player.color];
-                  const [row, col] = positions[idx] || positions[0];
-                  const isMovable = movablePieces.includes(piece.id) &&
-                    gameState.currentPlayerIndex === gameState.players.indexOf(player) &&
-                    !player.isBot &&
-                    (!isMultiplayer || player.id === myUserId);
-                  const cx = col * cellSize + cellSize / 2;
-                  const cy = row * cellSize + cellSize / 2;
-                  const r = cellSize / 2.5;
+                    const isMovable =
+                      !piece.isFinished &&
+                      movablePieces.includes(piece.id) &&
+                      gameState.currentPlayerIndex === gameState.players.indexOf(player) &&
+                      !player.isBot &&
+                      (!isMultiplayer || player.id === myUserId);
 
-                  return (
-                    <g
-                      key={`${player.color}-home-${piece.id}`}
-                      className={isMovable ? 'cursor-pointer' : ''}
-                      onClick={() => isMovable && handleMovePiece(piece.id)}
-                      style={isMovable ? { filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.6))' } : { filter: 'drop-shadow(0 1px 1.5px rgba(0,0,0,0.5))' }}
-                    >
-                      <circle
+                    const isPlayerTurn =
+                      !piece.isFinished &&
+                      gameState.currentPlayerIndex === gameState.players.indexOf(player);
+
+                    let state: PieceState = 'idle';
+                    if (piece.isFinished) state = 'finished';
+                    else if (isMovable) state = 'movable';
+                    else if (isPlayerTurn) state = 'turn';
+
+                    return (
+                      <GamePiece
+                        key={`${player.color}-${piece.id}`}
+                        color={player.color}
                         cx={cx}
                         cy={cy}
                         r={r}
-                        fill={COLORS[player.color]}
-                        stroke={isMovable ? '#fff' : 'rgba(0,0,0,0.4)'}
-                        strokeWidth={isMovable ? '0.6' : '0.3'}
+                        state={state}
+                        onClick={isMovable ? () => handleMovePiece(piece.id) : undefined}
                       />
-                      <ellipse cx={cx - r * 0.3} cy={cy - r * 0.35} rx={r * 0.45} ry={r * 0.3} fill="rgba(255,255,255,0.55)" pointerEvents="none" />
-                      {isMovable && (
-                        <circle cx={cx} cy={cy} r={r * 1.4} fill="transparent" />
-                      )}
-                    </g>
-                  );
-                });
-            })}
-
-            {/* Board pieces (position >= 0) */}
-            {gameState.players.filter((pp) => !pp.resigned).map((player) =>
-              player.pieces
-                .filter((p) => p.position >= 0 && !p.isFinished)
-                .map((piece) => {
-                  const pos = getPieceScreenPos(piece);
-                  if (!pos) return null;
-                  const isMovable = movablePieces.includes(piece.id) &&
-                    gameState.currentPlayerIndex === gameState.players.indexOf(player) &&
-                    !player.isBot &&
-                    (!isMultiplayer || player.id === myUserId);
-                  const r = cellSize / 2.8;
-
-                  return (
-                    <g
-                      key={`${player.color}-${piece.id}`}
-                      className={`transition-all duration-500 ${isMovable ? 'cursor-pointer' : ''}`}
-                      onClick={() => isMovable && handleMovePiece(piece.id)}
-                      style={isMovable ? { filter: 'drop-shadow(0 0 4px rgba(255,255,255,0.6))' } : { filter: 'drop-shadow(0 1px 1.5px rgba(0,0,0,0.5))' }}
-                    >
-                      <circle
-                        cx={pos.x}
-                        cy={pos.y}
-                        r={r}
-                        fill={COLORS[player.color]}
-                        stroke={isMovable ? '#fff' : 'rgba(0,0,0,0.4)'}
-                        strokeWidth={isMovable ? '0.6' : '0.3'}
-                      />
-                      <ellipse cx={pos.x - r * 0.3} cy={pos.y - r * 0.35} rx={r * 0.45} ry={r * 0.3} fill="rgba(255,255,255,0.55)" pointerEvents="none" />
-                      {isMovable && (
-                        <circle cx={pos.x} cy={pos.y} r={r * 1.4} fill="transparent" />
-                      )}
-                    </g>
-                  );
-                })
-            )}
-
-            {/* Finished pieces in center */}
-            {gameState.players.filter((pp) => !pp.resigned).map((player) => {
-              const finished = player.pieces.filter((p) => p.isFinished);
-              return finished.map((piece, idx) => (
-                <circle
-                  key={`fin-${player.color}-${piece.id}`}
-                  cx={7.5 * cellSize + (idx - 1.5) * 1.5}
-                  cy={7.5 * cellSize}
-                  r={cellSize / 4}
-                  fill={COLORS[player.color]}
-                  stroke="rgba(255,255,255,0.5)"
-                  strokeWidth="0.3"
-                />
-              ));
-            })}
+                    );
+                  }),
+                );
+            })()}
           </svg>
         </div>
 
-        {/* Bottom dice area */}
-        <div className="flex items-center justify-center gap-6 w-full max-w-[540px]">
-          <span className="text-primary text-xs font-bold bg-primary/10 px-2 py-1 rounded">Kz</span>
+        {/* Bottom dice area — dado clicável (sem botão separado) */}
+        {(() => {
+          const myTurn = currentPlayer && !currentPlayer.isBot && (!isMultiplayer || currentPlayer.id === myUserId);
+          const canRoll = gameState.phase === 'rolling' && myTurn && !animatingDice;
 
-          {/* Dice with circular timer */}
-          <div className="relative flex flex-col items-center">
-            <div className="relative w-16 h-16">
-              {/* Circular timer ring */}
-              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 56 56">
-                <circle cx="28" cy="28" r="24" fill="none" stroke="rgba(234,179,8,0.2)" strokeWidth="3" />
-                <circle
-                  cx="28" cy="28" r="24"
-                  fill="none"
-                  stroke="#eab308"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeDasharray={timerCircumference}
-                  strokeDashoffset={timerCircumference * (1 - timerPercent)}
-                  className="transition-all duration-1000 ease-linear"
-                />
-              </svg>
-              {/* Dice in center */}
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className={`bg-card border border-border rounded-lg p-1.5 ${animatingDice ? 'animate-spin' : ''}`}>
-                  {gameState.diceValue ? (
-                    <DiceIcon value={gameState.diceValue} className="w-6 h-6 text-foreground" />
-                  ) : (
-                    <Dice6 className="w-6 h-6 text-muted-foreground" />
-                  )}
-                </div>
-              </div>
-            </div>
-            <span className={`text-xs font-mono font-bold mt-1 ${gameState.turnTimer <= 5 ? 'text-destructive' : 'text-yellow-400'}`}>
-              {gameState.turnTimer}s
-            </span>
-          </div>
+          // Cor dinâmica do anel: verde (> 50%) → amarelo (20-50%) → vermelho (<= 20%)
+          const ringColor =
+            timerPercent > 0.5
+              ? '#22c55e'
+              : timerPercent > 0.2
+                ? '#facc15'
+                : '#ef4444';
+          const isUrgent = gameState.turnTimer <= 5;
 
-          {/* Roll button */}
-          {(() => {
-            const myTurn = currentPlayer && !currentPlayer.isBot && (!isMultiplayer || currentPlayer.id === myUserId);
-            const canRoll = gameState.phase === 'rolling' && myTurn && !animatingDice;
-            return (
+          // Cor de glow no dado: amarelo se podes rolar, senão a do timer
+          const auraColor = canRoll ? '#fbbf24' : ringColor;
+          const auraIntensity = canRoll ? '20px' : isUrgent ? '12px' : '6px';
+
+          const handleDiceClick = () => {
+            if (!canRoll) return;
+            playSound('button-click');
+            handleRollDice();
+          };
+
+          // Texto-status por baixo do dado
+          let statusText: string;
+          if (currentPlayer?.isBot) statusText = 'Bot a jogar...';
+          else if (myTurn) statusText = canRoll ? 'Toca no dado para lançar!' : 'A jogar...';
+          else statusText = `Vez de ${currentPlayer?.name}`;
+          const statusTone = canRoll ? '#fbbf24' : myTurn ? '#fcd34d' : '#94a3b8';
+
+          return (
+            <div className="flex flex-col items-center justify-center gap-2 w-full max-w-[540px] py-2">
               <button
-                onClick={handleRollDice}
+                type="button"
+                onClick={handleDiceClick}
                 disabled={!canRoll}
-                className={`px-8 py-3 rounded-full font-bold text-sm uppercase tracking-wider transition-all ${
-                  canRoll
-                    ? 'bg-yellow-500 hover:bg-yellow-400 text-black cursor-pointer active:scale-95 shadow-lg shadow-yellow-500/30'
-                    : 'bg-muted text-muted-foreground cursor-not-allowed'
-                }`}
+                aria-label={canRoll ? 'Lançar dado' : statusText}
+                className={`relative outline-none rounded-full p-1 transition-transform ${
+                  canRoll ? 'cursor-pointer hover:scale-[1.06] active:scale-95 anim-pulse-glow' : 'cursor-default'
+                } ${isUrgent && !canRoll ? 'anim-pulse-glow' : ''}`}
+                style={{
+                  filter: `drop-shadow(0 0 ${auraIntensity} ${auraColor}cc)`,
+                  transition: 'filter 240ms, transform 200ms',
+                }}
               >
-                {currentPlayer?.isBot ? 'Bot a jogar...' : myTurn ? 'Lançar Dado' : `Vez de ${currentPlayer?.name}`}
+                <div className="relative w-24 h-24">
+                  {/* Anel exterior: timer */}
+                  <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 56 56">
+                    <circle
+                      cx="28"
+                      cy="28"
+                      r="24"
+                      fill="none"
+                      stroke="rgba(255,255,255,0.08)"
+                      strokeWidth="4"
+                    />
+                    <circle
+                      cx="28"
+                      cy="28"
+                      r="24"
+                      fill="none"
+                      stroke={ringColor}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                      strokeDasharray={timerCircumference}
+                      strokeDashoffset={timerCircumference * (1 - timerPercent)}
+                      style={{ transition: 'stroke-dashoffset 1s linear, stroke 240ms' }}
+                    />
+                  </svg>
+                  {/* Halo dourado adicional quando podes rolar */}
+                  {canRoll && (
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 rounded-full pointer-events-none"
+                      style={{
+                        boxShadow: 'inset 0 0 0 2px rgba(251,191,36,0.55)',
+                      }}
+                    />
+                  )}
+                  {/* Dado 3D */}
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <Dice
+                      value={gameState.diceValue || 1}
+                      isRolling={animatingDice}
+                      size={50}
+                      theme="gold"
+                    />
+                  </div>
+                </div>
               </button>
-            );
-          })()}
 
-          <span className="text-primary text-xs font-bold bg-primary/10 px-2 py-1 rounded">Kz</span>
-        </div>
+              {/* Badge do tempo */}
+              <span
+                className={`text-[11px] font-mono font-extrabold px-2 py-0.5 rounded-md ${
+                  isUrgent ? 'animate-pulse' : ''
+                }`}
+                style={{
+                  color: ringColor,
+                  background: `${ringColor}1a`,
+                  border: `1px solid ${ringColor}55`,
+                  transition: 'color 240ms, background 240ms, border-color 240ms',
+                }}
+              >
+                {gameState.turnTimer}s
+              </span>
+
+              {/* Status por baixo */}
+              <span
+                className="text-xs font-bold uppercase tracking-wider"
+                style={{ color: statusTone }}
+              >
+                {statusText}
+              </span>
+            </div>
+          );
+        })()}
 
         {/* Bottom buttons */}
         <div className="flex items-center justify-end gap-2 w-full max-w-[540px]">
           {/* CHAT toggle (desktop only — on mobile chat is always visible) */}
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs hidden lg:inline-flex" onClick={() => setShowChat((s) => !s)}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs font-bold hidden lg:inline-flex border-white/10 bg-white/5 hover:bg-white/10 hover:scale-105 active:scale-95 transition-transform shadow-md"
+            onClick={() => setShowChat((s) => !s)}
+          >
             <MessageSquare className="w-3.5 h-3.5" />
             CHAT
           </Button>
@@ -781,12 +1034,16 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
             size="sm"
             onClick={() => setShowResignConfirm(true)}
             disabled={gameState.phase === 'finished'}
-            className="gap-1.5 text-xs border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className="gap-1.5 text-xs font-bold border-destructive/50 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive hover:scale-105 active:scale-95 transition-transform shadow-md"
           >
             <Flag className="w-3.5 h-3.5" />
             DESISTIR
           </Button>
-          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs font-bold border-white/10 bg-white/5 hover:bg-white/10 hover:scale-105 active:scale-95 transition-transform shadow-md"
+          >
             <Settings className="w-3.5 h-3.5" />
             OPÇÕES
           </Button>
@@ -808,12 +1065,27 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       <div className="hidden lg:flex w-64 flex-shrink-0 flex-col gap-3">
         {/* Pot */}
         {betAmount > 0 && (
-          <div className="bg-card rounded-xl border border-border p-4">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-bold text-muted-foreground uppercase">Pot Total</span>
-              <span className="text-[10px] text-muted-foreground">RAKE: 5%</span>
+          <div
+            className="rounded-xl p-4 relative overflow-hidden"
+            style={{
+              background: 'var(--grad-pot)',
+              boxShadow: '0 8px 30px rgba(245,158,11,0.35), inset 0 1px 0 rgba(255,255,255,0.4)',
+            }}
+          >
+            {/* shine sweep */}
+            <span
+              aria-hidden
+              className="absolute top-0 left-0 h-full w-1/3 pointer-events-none"
+              style={{
+                background: 'linear-gradient(110deg, transparent, rgba(255,255,255,0.45), transparent)',
+                animation: 'nanter-coin-shine 3.5s ease-in-out infinite',
+              }}
+            />
+            <div className="flex items-center justify-between mb-1 relative z-10">
+              <span className="text-xs font-bold uppercase text-amber-950/80 tracking-wider">Pot Total</span>
+              <span className="text-[10px] text-amber-950/70 font-semibold">RAKE 5%</span>
             </div>
-            <p className="text-2xl font-bold text-primary">
+            <p className="text-2xl font-extrabold text-amber-950 relative z-10 tracking-tight">
               Kz {potTotal.toLocaleString('pt-AO', { minimumFractionDigits: 2 })}
             </p>
           </div>
@@ -869,26 +1141,23 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         </div>
       )}
 
-      {/* Winner modal */}
-      {gameState.winner && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-          <div className="bg-card rounded-2xl p-8 text-center max-w-sm border border-yellow-500/30 shadow-2xl shadow-yellow-500/10">
-            <div className="text-6xl mb-4">🏆</div>
-            <h2 className="text-2xl font-bold text-foreground mb-2">Vitória!</h2>
-            <p className="text-muted-foreground mb-2">
-              {gameState.players.find((p) => p.id === gameState.winner)?.name} ganhou o jogo!
-            </p>
-            {betAmount > 0 && (
-              <p className="text-xl font-bold text-primary mb-6">
-                +{Math.floor(potTotal * 0.95).toLocaleString()} Kz
-              </p>
-            )}
-            <Button onClick={() => window.location.reload()} className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-bold">
-              Voltar ao Lobby
-            </Button>
-          </div>
-        </div>
-      )}
+      {/* Victory modal — confetti + Trophy + count-up + sound */}
+      {(() => {
+        const winnerPlayer = gameState.winner
+          ? gameState.players.find((p) => p.id === gameState.winner)
+          : null;
+        const isMe = !!(winnerPlayer && winnerPlayer.id === myUserId);
+        return (
+          <VictoryModal
+            open={!!gameState.winner}
+            winnerName={winnerPlayer?.name || 'Jogador'}
+            winnerColor={winnerPlayer?.color}
+            pot={betAmount > 0 ? potTotal : undefined}
+            isMe={isMe}
+            onClose={() => window.location.reload()}
+          />
+        );
+      })()}
     </div>
   );
 }

@@ -52,7 +52,7 @@ export function AuthPhone() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-8">
         <div className="text-center space-y-2">
           <div className="text-6xl mb-4">🎲</div>
