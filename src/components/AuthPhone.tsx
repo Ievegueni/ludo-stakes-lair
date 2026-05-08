@@ -55,9 +55,19 @@ export function AuthPhone() {
     <div className="min-h-screen flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-8">
         <div className="text-center space-y-2">
-          <div className="text-6xl mb-4">🎲</div>
-          <h1 className="text-3xl font-bold text-foreground">NANTER</h1>
-          <p className="text-muted-foreground">Joga, aposta e ganha!</p>
+          <img
+            src="/logo.png"
+            alt="NANTER"
+            className="w-44 h-44 mx-auto object-contain"
+            style={{ filter: 'drop-shadow(0 10px 30px rgba(124,58,237,0.65))' }}
+            draggable={false}
+          />
+          <p
+            className="text-white/85 font-medium"
+            style={{ textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}
+          >
+            Joga, aposta e ganha!
+          </p>
         </div>
 
         <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-xl">

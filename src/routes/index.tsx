@@ -78,8 +78,14 @@ function Index() {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center">
-          <div className="text-5xl animate-bounce mb-4">🎲</div>
-          <p className="text-muted-foreground">A carregar...</p>
+          <img
+            src="/logo.png"
+            alt="NANTER"
+            className="w-24 h-24 mx-auto mb-4 object-contain anim-float"
+            style={{ filter: 'drop-shadow(0 6px 20px rgba(124,58,237,0.55))' }}
+            draggable={false}
+          />
+          <p className="text-white/85 font-bold tracking-wider uppercase text-sm">A carregar...</p>
         </div>
       </div>
     );
@@ -137,18 +143,14 @@ function Index() {
           }}
         >
           <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
-            <div className="flex items-center gap-2">
-              {/* Logo NANTER em SVG estilizado (cubo com pip dourado) */}
-              <span aria-hidden className="inline-flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: 'linear-gradient(135deg, #4c1d95, #1e3a8a)', boxShadow: '0 4px 14px rgba(76,29,149,0.55), inset 0 1px 0 rgba(255,255,255,0.15)' }}>
-                <svg viewBox="0 0 32 32" className="w-5 h-5">
-                  <rect x="5" y="5" width="22" height="22" rx="5" fill="#fde68a" stroke="#f59e0b" strokeWidth="1.2" />
-                  <circle cx="11" cy="11" r="2" fill="#7c2d12" />
-                  <circle cx="21" cy="21" r="2" fill="#7c2d12" />
-                  <circle cx="21" cy="11" r="1.4" fill="#f59e0b" />
-                  <circle cx="11" cy="21" r="1.4" fill="#f59e0b" />
-                </svg>
-              </span>
-              <span className="font-extrabold tracking-wider text-foreground">NANTER</span>
+            <div className="flex items-center">
+              <img
+                src="/logo.png"
+                alt="NANTER"
+                className="h-12 w-auto object-contain"
+                style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.55))' }}
+                draggable={false}
+              />
             </div>
             <div className="flex items-center gap-3">
               <div
