@@ -55,68 +55,75 @@ function Index() {
     setMutedState(next);
   };
 
-  useEffect(() => {
-    if (!user) return;
-    loadProfile();
-    loadBalance();
-    // Pedir permissão de notificações uma vez (no-op se já foi pedida)
-    requestNotificationPermission();
-  }, [user, view]);
-
-  // Reconnect a um jogo em curso quando o utilizador faz login (ou reload).
-  // Se o servidor reporta uma sala em 'playing' onde ele está, salta
-  // automaticamente para o jogo — caso contrário fica no lobby.
+  // Bootstrap: carrega tudo em paralelo no primeiro mount (após login). Não
+  // refetch ao trocar de tab — só quando o user muda. Isto corta uma cascata
+  // de 4-5 round-trips sequenciais para 1 só burst em paralelo.
   const reconnectAttemptedRef = useRef(false);
   useEffect(() => {
-    if (!user || reconnectAttemptedRef.current) return;
-    reconnectAttemptedRef.current = true;
+    if (!user) return;
+
+    let cancelled = false;
     (async () => {
-      try {
-        const game = await api.games.active();
-        if (!game) return;
+      // Tudo em paralelo — não há dependências entre estes fetches
+      const [profileRes, balanceRes, activeRes] = await Promise.allSettled([
+        api.profiles.me(),
+        api.wallet.get(),
+        // Só corre o reconnect uma vez por sessão de login
+        reconnectAttemptedRef.current ? Promise.resolve(null) : api.games.active(),
+      ]);
 
-        // Não reentrar se:
-        //  - o jogo já tem vencedor (terminou mas o settle ainda não correu)
-        //  - já desisti deste jogo (estou marcado como resigned)
-        //  - não estou nos players (eg. fui removido do estado)
-        const stateAny = game.state as { winner?: string | null; players?: Array<{ id: string; resigned?: boolean }> };
-        if (stateAny.winner) {
-          // Tentar settle "manual" — chamar uma update vazia para o servidor processar
-          // (no-op se já settled). Se falhar, simplesmente não reentra.
-          return;
+      if (cancelled) return;
+
+      if (profileRes.status === 'fulfilled' && profileRes.value) {
+        setDisplayName(profileRes.value.display_name);
+      }
+      if (balanceRes.status === 'fulfilled') {
+        setBalance(balanceRes.value);
+      }
+
+      // Reconnect — só na primeira passagem
+      if (!reconnectAttemptedRef.current) {
+        reconnectAttemptedRef.current = true;
+        if (activeRes.status === 'fulfilled' && activeRes.value) {
+          const game = activeRes.value;
+          const stateAny = game.state as {
+            winner?: string | null;
+            players?: Array<{ id: string; resigned?: boolean }>;
+          };
+          if (stateAny.winner) return;
+          const me = stateAny.players?.find((p) => p.id === user.id);
+          if (!me || me.resigned) return;
+
+          // OK, reentrar — busca a room em paralelo (não bloqueia o gameplay)
+          const playersFromState = (game.state.players as any[]).map((p) => ({
+            id: p.id,
+            name: p.name,
+            color: p.color as PlayerColor,
+            isBot: p.isBot,
+          }));
+          const room = await api.rooms.get(game.room_id).catch(() => null);
+          if (cancelled) return;
+          setGamePlayers(playersFromState);
+          setGameBetAmount(room?.bet_amount ?? 0);
+          setMultiplayer({
+            gameId: game.id,
+            isHost: game.host_id === user.id,
+            initialState: game.state,
+            version: game.version,
+          });
+          setView('game');
+          toast.info('Reconectado ao jogo em curso');
         }
-        const me = stateAny.players?.find((p) => p.id === user.id);
-        if (!me) return;
-        if (me.resigned) return;
+      }
 
-        // OK, reentrar
-        const playersFromState = (game.state.players as any[]).map((p) => ({
-          id: p.id,
-          name: p.name,
-          color: p.color as PlayerColor,
-          isBot: p.isBot,
-        }));
-        const room = await api.rooms.get(game.room_id).catch(() => null);
-        setGamePlayers(playersFromState);
-        setGameBetAmount(room?.bet_amount ?? 0);
-        setMultiplayer({
-          gameId: game.id,
-          isHost: game.host_id === user.id,
-          initialState: game.state,
-          version: game.version,
-        });
-        setView('game');
-        toast.info('Reconectado ao jogo em curso');
-      } catch {}
+      // Notificações — operação síncrona/idempotente, não precisa estar no caminho crítico
+      requestNotificationPermission();
     })();
-  }, [user]);
 
-  const loadProfile = async () => {
-    try {
-      const profile = await api.profiles.me();
-      setDisplayName(profile.display_name);
-    } catch {}
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [user]); // <- só re-corre quando o user muda, NÃO em cada troca de tab
 
   const loadBalance = async () => {
     try {
