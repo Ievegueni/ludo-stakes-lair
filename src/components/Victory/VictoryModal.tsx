@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
-import { Crown } from 'lucide-react';
+import { Crown, Flag } from 'lucide-react';
 import { Trophy } from './Trophy';
 import { playSound } from '@/utils/sound';
-import type { PlayerColor } from '@/lib/ludo-engine';
+import type { Player, PlayerColor } from '@/lib/ludo-engine';
 
 const COLOR_HEX: Record<PlayerColor, string> = {
   red: '#ef4444',
@@ -17,7 +17,11 @@ interface VictoryModalProps {
   open: boolean;
   winnerName: string;
   winnerColor?: PlayerColor;
+  winnerId?: string | null;
   pot?: number;
+  betAmount?: number;
+  players?: Player[];
+  myUserId?: string;
   isMe?: boolean;
   onClose: () => void;
 }
@@ -46,7 +50,11 @@ export function VictoryModal({
   open,
   winnerName,
   winnerColor,
+  winnerId,
   pot,
+  betAmount = 0,
+  players = [],
+  myUserId,
   isMe,
   onClose,
 }: VictoryModalProps) {
@@ -153,7 +161,7 @@ export function VictoryModal({
 
             {pot && pot > 0 && (
               <div
-                className="rounded-2xl px-5 py-3 mb-6 mx-auto inline-flex items-center gap-2 relative"
+                className="rounded-2xl px-5 py-3 mb-4 mx-auto inline-flex items-center gap-2 relative"
                 style={{
                   background: 'var(--grad-pot)',
                   boxShadow: '0 0 24px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.45)',
@@ -163,6 +171,79 @@ export function VictoryModal({
                 <span className="font-extrabold text-lg text-amber-950">
                   +{count.toLocaleString()} Kz
                 </span>
+              </div>
+            )}
+
+            {/* Payout breakdown — só se houve aposta */}
+            {betAmount > 0 && players.length > 0 && (
+              <div
+                className="rounded-xl p-3 mb-5 text-left text-sm"
+                style={{
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                }}
+              >
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-2">
+                  Resultado
+                </p>
+                <ul className="space-y-1.5">
+                  {players.map((p) => {
+                    const isWinner = p.id === winnerId;
+                    const isYou = p.id === myUserId;
+                    let delta: number;
+                    let label: string;
+                    let color: string;
+                    if (p.isBot) {
+                      delta = 0;
+                      label = '—';
+                      color = 'text-muted-foreground';
+                    } else if (isWinner) {
+                      delta = pot ? Math.floor(pot * 0.95) : 0;
+                      label = `+${delta.toLocaleString()} Kz`;
+                      color = 'text-emerald-400';
+                    } else {
+                      delta = -betAmount;
+                      label = `${delta.toLocaleString()} Kz`;
+                      color = 'text-rose-400';
+                    }
+                    return (
+                      <li
+                        key={p.id}
+                        className={`flex items-center justify-between gap-2 px-2 py-1 rounded ${
+                          isWinner ? 'bg-amber-500/10' : ''
+                        } ${p.resigned ? 'opacity-50' : ''}`}
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: COLOR_HEX[p.color] }}
+                          />
+                          <span
+                            className={`font-semibold truncate ${
+                              p.resigned ? 'line-through' : ''
+                            }`}
+                            style={{ color: COLOR_HEX[p.color] }}
+                          >
+                            {p.name}
+                          </span>
+                          {isYou && !p.isBot && (
+                            <span className="text-[9px] uppercase font-bold text-white/50">tu</span>
+                          )}
+                          {/* bots não são identificados visualmente — parecem humanos */}
+                          {isWinner && <Crown size={12} className="text-amber-400" strokeWidth={2.5} />}
+                          {p.resigned && <Flag size={10} className="text-rose-400" />}
+                        </span>
+                        <span className={`font-extrabold tabular-nums shrink-0 ${color}`}>
+                          {label}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span>Pot total: {pot?.toLocaleString() ?? 0} Kz</span>
+                  <span>Rake 5%</span>
+                </div>
               </div>
             )}
 

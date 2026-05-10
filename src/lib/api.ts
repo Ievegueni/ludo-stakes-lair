@@ -30,6 +30,7 @@ export interface RoomPlayer {
   bot_name: string | null;
   color: string;
   is_ready: boolean;
+  bet_paid: boolean;
 }
 
 export interface Room {
@@ -39,6 +40,7 @@ export interface Room {
   bet_amount: number;
   max_players: number;
   status: 'waiting' | 'playing' | 'finished';
+  is_private: boolean;
   created_at: string;
   players: RoomPlayer[];
 }
@@ -85,6 +87,7 @@ async function request<T>(
   if (!res.ok) {
     const err = new Error(data?.error || `HTTP ${res.status}`);
     (err as any).status = res.status;
+    (err as any).data = data; // mantém o body completo para o caller poder ler campos extra
     throw err;
   }
   return data as T;
@@ -187,10 +190,10 @@ export const api = {
       const r = await request<{ rooms: Room[] }>('/api/rooms?status=waiting');
       return r.rooms;
     },
-    async create(bet_amount: number) {
+    async create(bet_amount: number, is_private = false) {
       const r = await request<{ room: Room }>('/api/rooms', {
         method: 'POST',
-        body: JSON.stringify({ bet_amount }),
+        body: JSON.stringify({ bet_amount, is_private }),
       });
       return r.room;
     },
@@ -223,11 +226,12 @@ export const api = {
       });
       return r.room;
     },
-    async leave(id: string) {
-      await request(`/api/rooms/${id}/leave`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
+    async leave(id: string): Promise<{ ok: boolean; refunded: boolean }> {
+      const r = await request<{ ok: boolean; refunded?: boolean }>(
+        `/api/rooms/${id}/leave`,
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+      return { ok: r.ok, refunded: !!r.refunded };
     },
   },
 
@@ -261,6 +265,10 @@ export const api = {
       );
       return r.game;
     },
+    async active() {
+      const r = await request<{ game: GameRecord | null }>(`/api/games/active`);
+      return r.game;
+    },
     async byRoom(roomId: string) {
       const r = await request<{ game: GameRecord }>(
         `/api/games/by-room/${roomId}`,
@@ -277,6 +285,19 @@ export const api = {
         body: JSON.stringify({ state, baseVersion }),
       });
       return r.game;
+    },
+  },
+
+  settings: {
+    /**
+     * Configuração actual do Smart Dice — gerida pelo admin no backoffice.
+     * Endpoint público (sem auth) com cache do lado do servidor.
+     */
+    async smartDice() {
+      const r = await request<{ config: import('./smart-dice').SmartDiceConfig }>(
+        `/api/settings/smart-dice`,
+      );
+      return r.config;
     },
   },
 

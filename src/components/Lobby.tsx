@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Users, Plus, DoorOpen, Bot, Play, Copy, LogOut, Wallet } from 'lucide-react';
+import { Users, Plus, DoorOpen, UserPlus, Play, Copy, LogOut, Wallet, Lock, Globe } from 'lucide-react';
 import type { PlayerColor } from '@/lib/ludo-engine';
 import { PlayerAvatar } from '@/components/PlayerAvatar';
 
@@ -16,7 +16,30 @@ const COLOR_LABELS: Record<PlayerColor, string> = {
   yellow: 'Amarelo',
 };
 
-const BOT_NAMES = ['Robo-1', 'AI-2', 'Bot-3', 'Cyber-4', 'Maquina', 'Jogador-Auto'];
+// Nomes próprios + apelidos típicos angolanos. Os "bots" são apresentados
+// como humanos (sem badge "🤖") para criar a sensação de jogo realista.
+const FIRST_NAMES = [
+  'Pedro', 'João', 'Manuel', 'António', 'Carlos', 'Paulo', 'Francisco', 'José',
+  'Rui', 'Diogo', 'André', 'Ricardo', 'Bruno', 'Tiago', 'Hugo', 'Miguel',
+  'Luís', 'Nuno', 'Vasco', 'Filipe', 'Sérgio', 'Henrique', 'Bernardo',
+  'Domingos', 'Mateus', 'Lourenço', 'Marcelo', 'Romeu', 'Tomás', 'Wilson',
+  'Maria', 'Ana', 'Beatriz', 'Carla', 'Catarina', 'Cláudia', 'Cristina',
+  'Daniela', 'Diana', 'Helena', 'Inês', 'Joana', 'Júlia', 'Laura', 'Leonor',
+  'Luísa', 'Mariana', 'Marta', 'Mónica', 'Patrícia', 'Raquel', 'Rita', 'Rosa',
+  'Sandra', 'Sara', 'Sílvia', 'Sofia', 'Susana', 'Teresa', 'Vanessa', 'Yolanda',
+];
+const LAST_NAMES = [
+  'Silva', 'Santos', 'Sousa', 'Pereira', 'Oliveira', 'Costa', 'Carvalho',
+  'Almeida', 'Lima', 'Rodrigues', 'Ferreira', 'Martins', 'Gomes', 'Cardoso',
+  'Mendes', 'Pinto', 'Barbosa', 'Cunha', 'Vieira', 'Tavares', 'Domingos',
+  'Quissende', 'Bonga', 'Mungunza', 'Capapelo', 'Tchindande',
+];
+
+function generateRandomName(): string {
+  const first = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]!;
+  const last = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]!;
+  return `${first} ${last}`;
+}
 const BET_AMOUNTS = [100, 500, 1000, 5000];
 
 interface LobbyProps {
@@ -26,15 +49,17 @@ interface LobbyProps {
     multiplayer?: { gameId: string; isHost: boolean; initialState: any; version: number },
   ) => void;
   balance: number;
+  onBalanceRefresh?: () => void;
 }
 
-export function Lobby({ onStartGame, balance }: LobbyProps) {
+export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
   const { user } = useAuth();
   const [rooms, setRooms] = useState<Room[]>([]);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [tab, setTab] = useState<'rooms' | 'create' | 'join'>('rooms');
   const [selectedBet, setSelectedBet] = useState(100);
+  const [isPrivate, setIsPrivate] = useState(false);
   const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const [hasStarted, setHasStarted] = useState(false);
 
@@ -91,11 +116,17 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
       return;
     }
     try {
-      const room = await api.rooms.create(selectedBet);
+      const room = await api.rooms.create(selectedBet, isPrivate);
       loadRoom(room.id);
-      toast.success(`Sala criada! Código: ${room.code}`);
-    } catch {
-      toast.error('Erro ao criar sala');
+      onBalanceRefresh?.();
+      toast.success(
+        isPrivate
+          ? `Sala privada criada! Partilha o código: ${room.code}`
+          : `Sala criada! Aposta debitada: ${selectedBet.toLocaleString()} Kz`,
+      );
+    } catch (err: any) {
+      const msg = err?.message || '';
+      toast.error(msg.includes('insufficient') ? 'Saldo insuficiente!' : 'Erro ao criar sala');
     }
   };
 
@@ -105,9 +136,22 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
       const room = await api.rooms.join(roomId);
       setCurrentRoom(room);
       loadRoom(room.id);
-      toast.success('Entraste na sala!');
+      onBalanceRefresh?.();
+      toast.success(`Entraste! Aposta de ${room.bet_amount.toLocaleString()} Kz debitada.`);
     } catch (err: any) {
-      toast.error(err.message || 'Erro ao entrar na sala');
+      const msg = err?.message || '';
+      const data = err?.data as { required?: number; available?: number } | undefined;
+      if (msg.includes('insufficient') || data?.required !== undefined) {
+        const need = data?.required ?? 0;
+        const have = data?.available ?? balance;
+        toast.error(
+          need > 0
+            ? `Saldo insuficiente. Precisas de ${need.toLocaleString()} Kz (tens ${have.toLocaleString()} Kz).`
+            : 'Saldo insuficiente para esta aposta',
+        );
+      } else {
+        toast.error(msg || 'Erro ao entrar na sala');
+      }
     }
   };
 
@@ -124,27 +168,63 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
     }
   };
 
-  const addBot = async () => {
+  /**
+   * Preenche todas as vagas restantes da sala com "jogadores" — internamente
+   * são bots, mas com nomes humanos aleatórios para parecerem reais.
+   */
+  const fillSeats = async () => {
     if (!currentRoom || !user) return;
     if (currentRoom.host_id !== user.id) {
-      toast.error('Só o anfitrião pode adicionar bots');
+      toast.error('Só o anfitrião pode preencher vagas');
       return;
     }
-    const botName = BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)];
-    try {
-      const room = await api.rooms.addBot(currentRoom.id, botName);
-      setCurrentRoom(room);
-      toast.success(`${botName} adicionado!`);
-    } catch (err: any) {
-      toast.error(err.message || 'Erro ao adicionar bot');
+    const slotsToFill = currentRoom.max_players - currentRoom.players.length;
+    if (slotsToFill <= 0) {
+      toast.error('Sala já está cheia');
+      return;
+    }
+    // Adiciona em sequência para evitar colisões de cor/index no servidor
+    let lastRoom = currentRoom;
+    const usedNames = new Set(lastRoom.players.map((p) => p.bot_name).filter(Boolean));
+    let added = 0;
+    for (let i = 0; i < slotsToFill; i++) {
+      // Garantir nome único
+      let name = generateRandomName();
+      let attempts = 0;
+      while (usedNames.has(name) && attempts < 10) {
+        name = generateRandomName();
+        attempts++;
+      }
+      usedNames.add(name);
+      try {
+        lastRoom = await api.rooms.addBot(currentRoom.id, name);
+        setCurrentRoom(lastRoom);
+        added++;
+      } catch (err: any) {
+        toast.error(err.message || 'Erro ao preencher vaga');
+        break;
+      }
+    }
+    if (added > 0) {
+      toast.success(`${added} ${added === 1 ? 'jogador adicionado' : 'jogadores adicionados'}`);
     }
   };
 
   const leaveRoom = async () => {
     if (!currentRoom || !user) return;
     try {
-      await api.rooms.leave(currentRoom.id);
+      const r = await api.rooms.leave(currentRoom.id);
       setCurrentRoom(null);
+      setHasStarted(false);
+      // Refresca saldo e mostra mensagem coerente com o que o servidor decidiu.
+      // O servidor é a fonte da verdade — só faz refund se a sala ainda
+      // estava em 'waiting' E não havia game record.
+      onBalanceRefresh?.();
+      if (r.refunded) {
+        toast.success('Saíste da sala. Aposta reembolsada.');
+      } else {
+        toast.info('Saíste da sala.');
+      }
       loadRooms();
     } catch {}
   };
@@ -191,7 +271,7 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
       .sort((a, b) => a.player_index - b.player_index)
       .map((p) => ({
         id: p.is_bot ? `bot-${p.id}` : p.user_id!,
-        name: p.is_bot ? (p.bot_name || 'Bot') : (names[p.user_id!] || 'Jogador'),
+        name: p.is_bot ? (p.bot_name || 'Jogador') : (names[p.user_id!] || 'Jogador'),
         color: p.color as PlayerColor,
         isBot: p.is_bot,
       }));
@@ -238,7 +318,22 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
         {/* Header da sala */}
         <div className="rounded-2xl p-4 border border-white/10 flex items-center justify-between" style={glassCard}>
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Sala de Espera</p>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold flex items-center gap-1.5">
+              Sala de Espera
+              {currentRoom.is_private && (
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-extrabold"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(124,58,237,0.55), rgba(59,130,246,0.40))',
+                    border: '1px solid rgba(124,58,237,0.60)',
+                    color: '#e9d5ff',
+                  }}
+                >
+                  <Lock className="w-2.5 h-2.5" />
+                  PRIVADA
+                </span>
+              )}
+            </p>
             <div className="flex items-center gap-2 mt-1">
               <span
                 className="font-mono font-extrabold text-lg tracking-[0.2em]"
@@ -305,6 +400,31 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
                       {COLOR_LABELS[p.color as PlayerColor]}
                     </p>
                   </div>
+                  {/* Estado de pagamento — bots não pagam, humanos sim */}
+                  {!p.is_bot && (
+                    <span
+                      className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider flex items-center gap-1 ${
+                        p.bet_paid
+                          ? 'text-emerald-300'
+                          : 'text-amber-300'
+                      }`}
+                      style={{
+                        background: p.bet_paid
+                          ? 'rgba(16,185,129,0.15)'
+                          : 'rgba(251,191,36,0.15)',
+                        border: p.bet_paid
+                          ? '1px solid rgba(16,185,129,0.40)'
+                          : '1px solid rgba(251,191,36,0.40)',
+                      }}
+                      title={
+                        p.bet_paid
+                          ? `Aposta de ${currentRoom.bet_amount.toLocaleString()} Kz já debitada`
+                          : 'Aposta ainda não debitada'
+                      }
+                    >
+                      {p.bet_paid ? '✓ Pago' : '⏳ Pendente'}
+                    </span>
+                  )}
                   {p.user_id === currentRoom.host_id && (
                     <span
                       className="text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider text-amber-950"
@@ -344,7 +464,7 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
         {currentRoom.host_id === user?.id && (
           <div className="flex gap-2">
             <button
-              onClick={addBot}
+              onClick={fillSeats}
               disabled={currentRoom.players.length >= currentRoom.max_players}
               className="flex-1 py-3 rounded-2xl font-bold text-sm uppercase tracking-wider transition-transform flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
@@ -355,8 +475,8 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
                 color: '#fff',
               }}
             >
-              <Bot className="w-4 h-4" />
-              Bot
+              <UserPlus className="w-4 h-4" />
+              Preencher
             </button>
             <button
               onClick={startGame}
@@ -590,6 +710,44 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
             </p>
           </div>
 
+          {/* Toggle: Pública vs Privada */}
+          <div>
+            <p className="text-sm font-bold text-foreground mb-2.5 uppercase tracking-wider">Visibilidade</p>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { val: false, icon: Globe, label: 'Pública', desc: 'Aparece a todos' },
+                { val: true, icon: Lock, label: 'Privada', desc: 'Só por código' },
+              ] as const).map(({ val, icon: Icon, label, desc }) => {
+                const sel = isPrivate === val;
+                return (
+                  <button
+                    key={String(val)}
+                    onClick={() => setIsPrivate(val)}
+                    className="flex flex-col items-center gap-1 py-2.5 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-95"
+                    style={
+                      sel
+                        ? {
+                            background: 'linear-gradient(135deg, rgba(124,58,237,0.45), rgba(59,130,246,0.30))',
+                            border: '1px solid rgba(124,58,237,0.60)',
+                            color: '#fff',
+                            boxShadow: '0 4px 14px rgba(124,58,237,0.40), inset 0 1px 0 rgba(255,255,255,0.18)',
+                          }
+                        : {
+                            background: 'rgba(255,255,255,0.05)',
+                            border: '1px solid rgba(255,255,255,0.10)',
+                            color: 'rgba(255,255,255,0.6)',
+                          }
+                    }
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{label}</span>
+                    <span className="text-[9px] font-medium opacity-80">{desc}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           <button
             onClick={createRoom}
             disabled={balance < selectedBet}
@@ -599,8 +757,8 @@ export function Lobby({ onStartGame, balance }: LobbyProps) {
               boxShadow: '0 6px 20px rgba(245,158,11,0.35), inset 0 1px 0 rgba(255,255,255,0.45)',
             }}
           >
-            <Plus className="w-4 h-4" />
-            Criar Sala
+            {isPrivate ? <Lock className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            {isPrivate ? 'Criar Sala Privada' : 'Criar Sala'}
           </button>
           {balance < selectedBet && (
             <p className="text-xs text-destructive text-center font-bold">

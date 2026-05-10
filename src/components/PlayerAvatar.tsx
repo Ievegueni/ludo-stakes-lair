@@ -1,4 +1,4 @@
-import { Bot, Crown, Flag } from 'lucide-react';
+import { Crown, Flag } from 'lucide-react';
 import type { PlayerColor } from '@/lib/ludo-engine';
 
 /**
@@ -26,7 +26,7 @@ const COLOR_DARK: Record<PlayerColor, string> = {
   yellow: '#854d0e',
 };
 
-export type PlayerAvatarBadge = 'bot' | 'resigned' | 'winner' | null;
+export type PlayerAvatarBadge = 'resigned' | 'winner' | null;
 
 export interface PlayerAvatarProps {
   name: string;
@@ -54,13 +54,10 @@ export function PlayerAvatar({
   const ring = color ? COLOR_HEX[color] : '#a1a1aa';
   const ringDark = color ? COLOR_DARK[color] : '#52525b';
   const initial = (name || '?').trim().charAt(0).toUpperCase();
-  const badge: PlayerAvatarBadge = isWinner
-    ? 'winner'
-    : resigned
-      ? 'resigned'
-      : isBot
-        ? 'bot'
-        : null;
+  // Os "bots" são apresentados como humanos — sem badge identificador.
+  // Apenas vencedor e desistente mostram badge.
+  void isBot; // mantido na assinatura por compat
+  const badge: PlayerAvatarBadge = isWinner ? 'winner' : resigned ? 'resigned' : null;
 
   return (
     <div
@@ -138,19 +135,15 @@ export function PlayerAvatar({
             background:
               badge === 'winner'
                 ? 'linear-gradient(135deg, #fde047, #f59e0b)'
-                : badge === 'resigned'
-                  ? '#dc2626'
-                  : '#3f3f46',
+                : '#dc2626',
             border: '1.5px solid #0b0817',
             boxShadow: '0 2px 6px rgba(0,0,0,0.55)',
           }}
         >
           {badge === 'winner' ? (
             <Crown size={size * 0.24} color="#7c2d12" strokeWidth={2.5} />
-          ) : badge === 'resigned' ? (
-            <Flag size={size * 0.22} color="#fff" strokeWidth={2.5} />
           ) : (
-            <Bot size={size * 0.24} color="#fff" strokeWidth={2.5} />
+            <Flag size={size * 0.22} color="#fff" strokeWidth={2.5} />
           )}
         </div>
       )}

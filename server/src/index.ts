@@ -4,11 +4,14 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { runMigrations } from './migrate.js';
 import { startRealtime, realtimeHandler } from './realtime.js';
+import { startRoomsCleanup } from './workers/rooms-cleanup.js';
 import authRoutes from './routes/auth.js';
 import profileRoutes from './routes/profiles.js';
 import walletRoutes from './routes/wallet.js';
 import roomRoutes from './routes/rooms.js';
 import gameRoutes from './routes/games.js';
+import settingsRoutes from './routes/settings.js';
+import reportsRoutes from './routes/reports.js';
 
 const app = new Hono();
 
@@ -21,6 +24,8 @@ app.route('/api/profiles', profileRoutes);
 app.route('/api/wallet', walletRoutes);
 app.route('/api/rooms', roomRoutes);
 app.route('/api/games', gameRoutes);
+app.route('/api/settings', settingsRoutes);
+app.route('/api/reports', reportsRoutes);
 
 app.get('/api/realtime', realtimeHandler);
 
@@ -47,6 +52,7 @@ const port = Number(process.env.PORT || 3001);
 async function main() {
   await runMigrations();
   await startRealtime();
+  startRoomsCleanup();
   serve({ fetch: app.fetch, port }, (info) => {
     console.log(`[nanter-api] listening on http://localhost:${info.port}`);
   });

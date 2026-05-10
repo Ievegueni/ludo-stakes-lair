@@ -3,6 +3,7 @@ import { MessageCircle, Send, Smile, Gift, X, Wallet as WalletIcon } from 'lucid
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { playSound } from '@/utils/sound';
+import { notify } from '@/utils/notifications';
 import type { Player, PlayerColor } from '@/lib/ludo-engine';
 
 const COLORS: Record<PlayerColor, string> = {
@@ -12,7 +13,7 @@ const COLORS: Record<PlayerColor, string> = {
   yellow: '#eab308',
 };
 
-const QUICK_EMOJIS = ['😂', '😎', '🔥', '💀', '🤡', '👑', '🎲', '🏆', '😭', '🤣', '👏', '💪', '🤔', '😱', '🥶', '🫡'];
+// Os emojis rápidos estão na barra "EMOJI" do LudoBoard (botão dedicado).
 
 const EMOJI_PICKER = [
   '😀', '😂', '🤣', '😎', '😍', '🥳', '😜', '🤪', '😏', '😒', '😭', '😱', '🥶', '🤯', '🤔', '🤨',
@@ -91,6 +92,20 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
     }
   }, [messages]);
 
+  // Permite que o LudoBoard envie um emoji rápido sem precisar de abrir
+  // o input do chat. Disparado pelo botão EMOJI da barra.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<string>).detail;
+      if (typeof detail === 'string' && detail.length > 0) {
+        void sendMessage(detail);
+      }
+    };
+    window.addEventListener('nanter-quick-emoji', handler);
+    return () => window.removeEventListener('nanter-quick-emoji', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me, isSync, gameId]);
+
   // Sync mode: load history + subscribe realtime
   useEffect(() => {
     if (!isSync || !gameId) return;
@@ -126,9 +141,20 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
       const msg = mapRow(ev.row);
       setMessages((prev) => {
         if (prev.find((m) => m.id === msg.id)) return prev;
-        // Tocar som apenas se a mensagem é de outro jogador
         if (msg.authorId !== currentUserId) {
           playSound(msg.gift ? 'gift-received' : 'chat-message');
+          // Notificar (apenas em background)
+          if (msg.gift) {
+            notify(`🎁 ${msg.authorName} enviou-te um gift`, {
+              body: `${msg.gift.emoji} ${msg.gift.name}`,
+              tag: 'nanter-chat',
+            });
+          } else {
+            notify(`💬 ${msg.authorName}`, {
+              body: msg.text || '...',
+              tag: 'nanter-chat',
+            });
+          }
         }
         return [...prev, msg];
       });
@@ -329,19 +355,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
         )}
       </div>
 
-      {/* Quick emojis */}
-      <div className="px-2 py-1.5 border-t border-border flex gap-1 overflow-x-auto">
-        {QUICK_EMOJIS.map((e) => (
-          <button
-            key={e}
-            onClick={() => sendMessage(e)}
-            className="shrink-0 text-xl hover:scale-125 transition-transform p-1"
-            aria-label={`Enviar ${e}`}
-          >
-            {e}
-          </button>
-        ))}
-      </div>
+      {/* Quick emojis bar removida — usar o botão EMOJI da barra principal. */}
 
       {/* Emoji picker */}
       {showEmojis && (
@@ -471,7 +485,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
                         className="w-2.5 h-2.5 rounded-full"
                         style={{ backgroundColor: COLORS[p.color] }}
                       />
-                      {p.name}{p.isBot && ' 🤖'}
+                      {p.name}
                     </button>
                   ))}
                 </div>

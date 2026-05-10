@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { one, query, pool } from '../db.js';
 import { requireAuth } from '../auth.js';
+import { chargeBet, InsufficientBalanceError } from '../lib/wallet.js';
 
 const app = new Hono();
 
@@ -31,6 +32,22 @@ interface GameState {
   turnTimer: number;
   consecutiveSixes: number;
   phase: 'rolling' | 'moving' | 'finished';
+}
+
+/**
+ * Determina o "bot driver" — o cliente humano responsável por avançar a
+ * vez de bots e timeouts. Algoritmo determinístico: primeiro humano
+ * não-bot e não-resigned na ordem do array. Todos os clientes calculam
+ * a mesma resposta a partir do mesmo `state`.
+ *
+ * Se o host original sai/desiste, o seguinte humano herda automaticamente
+ * o papel de bot driver — sem necessidade de reeleição.
+ */
+function getBotDriverId(state: GameState): string | null {
+  const humans = state.players.filter(
+    (p: any) => !p.isBot && !p.resigned && !!p.id,
+  );
+  return humans.length > 0 ? humans[0].id : null;
 }
 
 function buildInitialState(
@@ -98,6 +115,47 @@ app.post('/start/:roomId', async (c) => {
       return c.json({ error: 'need at least 2 players' }, 400);
     }
 
+    // Safeguard: nenhum jogo arranca sem TODOS os humanos terem pago.
+    // Se algum tiver `bet_paid=false` (sala legacy ou bug histórico),
+    // tenta fazer backfill da cobrança AGORA. Se algum não tiver saldo,
+    // recusa o start com erro detalhado (o host vê quem falhou).
+    const unpaidHumans = playersRes.rows.filter(
+      (p: any) => !p.is_bot && p.user_id && !p.bet_paid,
+    );
+    if (unpaidHumans.length > 0) {
+      console.warn(
+        `[games.start] ${unpaidHumans.length} unpaid players in room ${room.code} — attempting backfill`,
+      );
+      for (const p of unpaidHumans) {
+        try {
+          await chargeBet(
+            client,
+            p.user_id,
+            roomId,
+            Number(room.bet_amount),
+            `Aposta na sala ${room.code} (backfill no start)`,
+          );
+        } catch (err) {
+          await client.query('ROLLBACK');
+          if (err instanceof InsufficientBalanceError) {
+            return c.json(
+              {
+                error: 'unpaid players',
+                message:
+                  'Um ou mais jogadores não têm saldo suficiente para a aposta. O jogo não pode iniciar.',
+                userId: p.user_id,
+                required: err.required,
+                available: err.available,
+              },
+              400,
+            );
+          }
+          console.error('[games.start] backfill chargeBet failed:', err);
+          return c.json({ error: 'start failed' }, 500);
+        }
+      }
+    }
+
     // Resolve human profile names + avatar URLs
     const humanIds = playersRes.rows
       .filter((p: any) => !p.is_bot && p.user_id)
@@ -145,6 +203,35 @@ app.post('/start/:roomId', async (c) => {
   }
 });
 
+/**
+ * Devolve o jogo em curso onde o utilizador está como jogador, se existir.
+ * Usado para re-entrar num jogo após reload/disconnect.
+ */
+app.get('/active', async (c) => {
+  const u = c.get('user');
+  // Filtros adicionais via JSON do state:
+  //  - winner deve ser NULL (jogo não terminado)
+  //  - este utilizador NÃO pode estar marcado como resigned no array de players
+  const game = await one<any>(
+    `SELECT g.* FROM games g
+     INNER JOIN rooms r ON r.id = g.room_id
+     INNER JOIN room_players rp ON rp.room_id = r.id
+     WHERE r.status = 'playing'
+       AND g.settled = false
+       AND rp.user_id = $1
+       AND COALESCE(g.state->>'winner', '') = ''
+       AND NOT EXISTS (
+         SELECT 1 FROM jsonb_array_elements(g.state->'players') AS p
+         WHERE p->>'id' = $1::text AND (p->>'resigned')::boolean = true
+       )
+     ORDER BY g.created_at DESC
+     LIMIT 1`,
+    [u.id],
+  );
+  if (!game) return c.json({ game: null });
+  return c.json({ game });
+});
+
 app.get('/by-room/:roomId', async (c) => {
   const game = await one<any>('SELECT * FROM games WHERE room_id = $1', [
     c.req.param('roomId'),
@@ -164,6 +251,10 @@ app.get('/:id', async (c) => {
 // Apply a state update. Server-side checks: only player whose turn it is (or
 // the host, who controls bots' turns) can push. Uses optimistic concurrency
 // via `version` to avoid lost updates.
+//
+// Settle automático: se o estado novo introduz um `winner` que ainda não tinha
+// sido contabilizado, o servidor credita o prémio (pot × 0.95) ao vencedor
+// humano. Se o vencedor é bot, todo o pot vai para a casa (rake total).
 app.patch('/:id', async (c) => {
   const u = c.get('user');
   const id = c.req.param('id');
@@ -179,9 +270,12 @@ app.patch('/:id', async (c) => {
       host_id: string;
       state: GameState;
       version: number;
-    }>('SELECT host_id, state, version FROM games WHERE id = $1 FOR UPDATE', [
-      id,
-    ]);
+      room_id: string;
+      settled: boolean;
+    }>(
+      'SELECT host_id, state, version, room_id, settled FROM games WHERE id = $1 FOR UPDATE',
+      [id],
+    );
     const game = cur.rows[0];
     if (!game) {
       await client.query('ROLLBACK');
@@ -197,25 +291,75 @@ app.patch('/:id', async (c) => {
 
     const cur_state = game.state;
     const currentPlayer = cur_state.players[cur_state.currentPlayerIndex];
-    const isHost = game.host_id === u.id;
+    const driverId = getBotDriverId(cur_state);
+    const isDriver = driverId === u.id;
     const isCurrentPlayer = currentPlayer && currentPlayer.id === u.id;
     const isBotTurn = currentPlayer?.isBot;
 
-    // Only the player whose turn it is OR the host (for bot turns or timeouts) can push
-    if (!isCurrentPlayer && !isHost) {
+    // Pode empurrar:
+    //  - O jogador da vez (jogada própria)
+    //  - O bot driver (vez de bot ou timeout)
+    if (!isCurrentPlayer && !isDriver) {
       await client.query('ROLLBACK');
       return c.json({ error: 'not your turn' }, 403);
     }
-    // Bots: only host applies
-    if (isBotTurn && !isHost) {
+    if (isBotTurn && !isDriver) {
       await client.query('ROLLBACK');
-      return c.json({ error: 'bot turn — host only' }, 403);
+      return c.json({ error: 'bot turn — driver only' }, 403);
     }
+
+    // Detectar transição para vencedor (settle uma única vez)
+    const wasFinished = !!cur_state.winner;
+    const isFinished = !!body.state.winner;
+    const justFinished = !wasFinished && isFinished && !game.settled;
 
     const updated = await client.query<any>(
       `UPDATE games SET state = $1::jsonb, version = version + 1, updated_at = now() WHERE id = $2 RETURNING *`,
       [JSON.stringify(body.state), id],
     );
+
+    if (justFinished) {
+      // Calcular pot: soma das apostas pagas (apenas humanos pagam)
+      const roomRes = await client.query<{ bet_amount: string }>(
+        'SELECT bet_amount FROM rooms WHERE id = $1',
+        [game.room_id],
+      );
+      const betAmount = Number(roomRes.rows[0]?.bet_amount ?? 0);
+      const paidRes = await client.query<{ user_id: string }>(
+        'SELECT user_id FROM room_players WHERE room_id = $1 AND bet_paid = true AND user_id IS NOT NULL',
+        [game.room_id],
+      );
+      const paidUserIds = paidRes.rows.map((r) => r.user_id);
+      const pot = betAmount * paidUserIds.length;
+      const prize = Math.floor(pot * 0.95);
+
+      const winnerId = body.state.winner!;
+      const winnerPlayer = body.state.players.find((p) => p.id === winnerId);
+      const winnerIsBot = !!winnerPlayer?.isBot;
+
+      // Creditar ao vencedor humano (se aplicável)
+      if (!winnerIsBot && paidUserIds.includes(winnerId) && prize > 0) {
+        await client.query(
+          'UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2',
+          [prize, winnerId],
+        );
+        await client.query(
+          'INSERT INTO transactions (user_id, type, amount, description) VALUES ($1, $2, $3, $4)',
+          [winnerId, 'win', prize, `Vitória — prémio de ${prize.toLocaleString()} Kz`],
+        );
+      }
+
+      await client.query(
+        `UPDATE games SET settled = true, settled_at = now(), winner_user_id = $1, prize = $2 WHERE id = $3`,
+        [winnerIsBot ? null : winnerId, prize, id],
+      );
+      // Marca a sala como finished
+      await client.query(
+        "UPDATE rooms SET status = 'finished' WHERE id = $1",
+        [game.room_id],
+      );
+    }
+
     await client.query('COMMIT');
     return c.json({ game: updated.rows[0] });
   } catch (err) {

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { AuthPhone } from "@/components/AuthPhone";
 import { LudoBoard } from "@/components/LudoBoard";
@@ -8,11 +8,12 @@ import { Wallet } from "@/components/Wallet";
 import { Profile } from "@/components/Profile";
 import { api } from "@/lib/api";
 import { createPlayer, type PlayerColor } from "@/lib/ludo-engine";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 import { LogOut, Wallet as WalletIcon, Gamepad2, User, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { isMuted, setMuted } from "@/utils/sound";
+import { requestNotificationPermission } from "@/utils/notifications";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -58,7 +59,57 @@ function Index() {
     if (!user) return;
     loadProfile();
     loadBalance();
+    // Pedir permissão de notificações uma vez (no-op se já foi pedida)
+    requestNotificationPermission();
   }, [user, view]);
+
+  // Reconnect a um jogo em curso quando o utilizador faz login (ou reload).
+  // Se o servidor reporta uma sala em 'playing' onde ele está, salta
+  // automaticamente para o jogo — caso contrário fica no lobby.
+  const reconnectAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (!user || reconnectAttemptedRef.current) return;
+    reconnectAttemptedRef.current = true;
+    (async () => {
+      try {
+        const game = await api.games.active();
+        if (!game) return;
+
+        // Não reentrar se:
+        //  - o jogo já tem vencedor (terminou mas o settle ainda não correu)
+        //  - já desisti deste jogo (estou marcado como resigned)
+        //  - não estou nos players (eg. fui removido do estado)
+        const stateAny = game.state as { winner?: string | null; players?: Array<{ id: string; resigned?: boolean }> };
+        if (stateAny.winner) {
+          // Tentar settle "manual" — chamar uma update vazia para o servidor processar
+          // (no-op se já settled). Se falhar, simplesmente não reentra.
+          return;
+        }
+        const me = stateAny.players?.find((p) => p.id === user.id);
+        if (!me) return;
+        if (me.resigned) return;
+
+        // OK, reentrar
+        const playersFromState = (game.state.players as any[]).map((p) => ({
+          id: p.id,
+          name: p.name,
+          color: p.color as PlayerColor,
+          isBot: p.isBot,
+        }));
+        const room = await api.rooms.get(game.room_id).catch(() => null);
+        setGamePlayers(playersFromState);
+        setGameBetAmount(room?.bet_amount ?? 0);
+        setMultiplayer({
+          gameId: game.id,
+          isHost: game.host_id === user.id,
+          initialState: game.state,
+          version: game.version,
+        });
+        setView('game');
+        toast.info('Reconectado ao jogo em curso');
+      } catch {}
+    })();
+  }, [user]);
 
   const loadProfile = async () => {
     try {
@@ -115,13 +166,20 @@ function Index() {
             onBalanceChange={setBalance}
             currentUserId={user!.id}
             multiplayer={multiplayer}
-            onGameEnd={(winnerId) => {
-              setTimeout(() => {
-                setView('lobby');
-                setGamePlayers(null);
-                setMultiplayer(null);
-                loadBalance();
-              }, 3000);
+            onGameEnd={() => {
+              // Settle no servidor é automático; aqui só refrescamos o saldo
+              // local. O modal de vitória fica aberto até o user clicar
+              // "Voltar ao Lobby" → onLeaveGame.
+              loadBalance();
+            }}
+            onLeaveGame={() => {
+              setView('lobby');
+              setGamePlayers(null);
+              setMultiplayer(null);
+              setGameBetAmount(0);
+              loadBalance();
+              // Permite que o reconnect volte a tentar (caso o user entre noutro jogo)
+              reconnectAttemptedRef.current = true;
             }}
           />
         </div>
@@ -196,6 +254,7 @@ function Index() {
           {view === 'lobby' && (
             <Lobby
               balance={balance}
+              onBalanceRefresh={loadBalance}
               onStartGame={(players, bet, mp) => {
                 setGamePlayers(players);
                 setGameBetAmount(bet);
