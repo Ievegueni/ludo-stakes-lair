@@ -15,19 +15,25 @@ import {
 import {
   smartRollDice,
   resetHistory as resetSmartDiceHistory,
+  setActiveGame as setSmartDiceGame,
+  pruneOldGames as pruneSmartDiceGames,
   DEFAULT_CONFIG as SMART_DICE_DEFAULT,
   type SmartDiceConfig,
 } from '@/lib/smart-dice';
-import { MessageSquare, Settings, Trophy, Flag } from 'lucide-react';
+import { MessageSquare, Trophy, Flag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GameChat } from '@/components/GameChat';
-import { GamePiece, type PieceState } from '@/components/Pieces/GamePiece';
+import { GamePiece, type PieceState, type Waypoint } from '@/components/Pieces/GamePiece';
 import { CaptureBurst } from '@/components/Pieces/CaptureBurst';
 import { Dice } from '@/components/Dice/Dice';
 import { PlayerAvatar } from '@/components/PlayerAvatar';
-import { PlayerSlot } from '@/components/PlayerSlot';
 import { VictoryModal } from '@/components/Victory/VictoryModal';
 import { playSound } from '@/utils/sound';
+import {
+  hapticTurn,
+  hapticCaptureSuccess,
+  hapticCaptureLoss,
+} from '@/utils/haptics';
 import { notify } from '@/utils/notifications';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
@@ -105,7 +111,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
           diceValue: null,
           isRolling: false,
           winner: null,
-          turnTimer: 30,
+          turnTimer: 15,
           consecutiveSixes: 0,
           phase: 'rolling',
         },
@@ -118,8 +124,12 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
   const [notification, setNotification] = useState<string | null>(null);
   const [gameLog, setGameLog] = useState<LogEntry[]>([]);
   const [bursts, setBursts] = useState<Array<{ id: number; cx: number; cy: number; color: PlayerColor }>>([]);
+  const [autoPlay, setAutoPlay] = useState<Set<string>>(new Set());
+  const [showAutoPlayBanner, setShowAutoPlayBanner] = useState(false);
   const burstIdRef = useRef(0);
   const logIdRef = useRef(0);
+  // Guard: impede useEffect de duplicar sons que ja tocaram via accao local
+  const localSoundRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const botTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -176,10 +186,14 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     smartDiceConfigRef.current = smartDiceConfig;
   }, [smartDiceConfig]);
 
-  // Reset smart-dice history ao montar (novo jogo) e ao desmontar (saída).
-  // Garante que streaks de "sem 6" não atravessam jogos diferentes.
+  // Isolar smart-dice history por jogo. Usa o gameId do multiplayer ou
+  // um id unico para jogos locais — history nunca contamina entre jogos.
+  const localGameId = useRef(`local-${Date.now()}`);
+  const gameId = multiplayer?.gameId ?? localGameId.current;
+
   useEffect(() => {
-    resetSmartDiceHistory();
+    setSmartDiceGame(gameId);
+    pruneSmartDiceGames(gameId);
     // Fetch config — silencioso em caso de erro (mantém defaults).
     (async () => {
       try {
@@ -190,7 +204,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     return () => {
       resetSmartDiceHistory();
     };
-  }, []);
+  }, [gameId]);
 
   const addLog = useCallback((color: PlayerColor, text: string, highlight = false) => {
     logIdRef.current++;
@@ -224,31 +238,42 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     const prev = prevStateRef.current;
     prevStateRef.current = gameState;
 
-    // Notificar quando passa a ser a minha vez (apenas em multiplayer e
-    // quando a página está em background)
-    if (
-      isMultiplayer &&
-      myUserId &&
+    // Detecta passagem para a minha vez de jogar
+    const isMyTurnNow =
+      !!myUserId &&
       gameState.players[gameState.currentPlayerIndex]?.id === myUserId &&
-      prevTurnIdxRef.current !== gameState.currentPlayerIndex
-    ) {
-      notify('🎲 É a tua vez!', {
-        body: 'Volta ao jogo para lançar o dado.',
-        tag: 'nanter-turn',
-      });
+      prevTurnIdxRef.current !== gameState.currentPlayerIndex &&
+      prevTurnIdxRef.current !== -1; // ignora mount inicial
+
+    if (isMyTurnNow) {
+      // Vibração subtil — funciona contra bots E em multiplayer
+      hapticTurn();
+      // Notificação push só faz sentido em multiplayer e em background
+      if (isMultiplayer) {
+        notify('🎲 É a tua vez!', {
+          body: 'Volta ao jogo para lançar o dado.',
+          tag: 'nanter-turn',
+        });
+      }
     }
     prevTurnIdxRef.current = gameState.currentPlayerIndex;
 
     if (!prev) return;
 
-    // 1) Dice rolled (diceValue null → number)
-    if (prev.diceValue == null && gameState.diceValue != null) {
+    // 1) Dice rolled (diceValue null → number) — so toca para eventos remotos
+    if (prev.diceValue == null && gameState.diceValue != null && !localSoundRef.current) {
       playSound('dice-roll');
     }
 
     // 2) Piece moved + capture detection (tocar som + disparar burst visual)
     let captured = false;
     let moved = false;
+    // Para haptics: distinguir "eu comi" de "fui comido". A captura acontece
+    // durante a vez do `currentPlayerIndex` do estado ANTERIOR (o jogador
+    // que mexeu). A vítima é o player `pi` cuja peça voltou para -1.
+    const attacker = prev.players[prev.currentPlayerIndex];
+    let iCaptured = false; // EU comi alguém
+    let iWasCaptured = false; // A MINHA peça foi comida
     const newBursts: Array<{ id: number; cx: number; cy: number; color: PlayerColor }> = [];
     for (let pi = 0; pi < gameState.players.length; pi++) {
       const p1 = prev.players[pi];
@@ -262,6 +287,11 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
           // Capture: piece was active on track (>=0 && <52) and is now back to home (-1)
           if (pos1 !== undefined && pos1 >= 0 && pos1 < 52 && pos2 === -1) {
             captured = true;
+            // Atribuição: a vítima é p2 (cujo position foi para -1), o atacante é o currentPlayer anterior
+            if (myUserId) {
+              if (p2.id === myUserId) iWasCaptured = true;
+              if (attacker && attacker.id === myUserId && p2.id !== myUserId) iCaptured = true;
+            }
             // Calcular coordenadas da posição original (cellSize aqui = 100/15)
             const cs = 100 / 15;
             const absPos = (pos1 + START_POSITIONS[p2.color as PlayerColor]) % 52;
@@ -283,10 +313,16 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       setBursts((b) => [...b, ...newBursts]);
     }
     if (captured) {
-      playSound('piece-capture');
+      if (!localSoundRef.current) playSound('piece-capture');
+      // Haptics: padrões diferentes consoante o papel. "Fui comido" tem
+      // prioridade sobre "eu comi" no caso (raro) de captura mútua.
+      if (iWasCaptured) hapticCaptureLoss();
+      else if (iCaptured) hapticCaptureSuccess();
     } else if (moved) {
-      playSound('piece-move');
+      if (!localSoundRef.current) playSound('piece-move');
     }
+    // Reset guard apos processar
+    localSoundRef.current = false;
 
     // 3) Timer tick — só nos últimos 5s
     if (
@@ -344,6 +380,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
   }, [isMultiplayer, multiplayer]);
 
   // Turn timer — in multiplayer, only the host ticks.
+  // Quando o tempo expira, o jogador entra em AUTO-PLAY (bot joga por ele).
   useEffect(() => {
     if (gameState.phase === 'finished') return;
     if (isMultiplayer && !isBotDriver) return;
@@ -351,13 +388,23 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       setGameState((prev) => {
         if (prev.phase === 'finished') return prev;
         if (prev.turnTimer <= 1) {
+          // Activar auto-play para o jogador que deixou o tempo expirar
+          const timedOutPlayer = prev.players[prev.currentPlayerIndex];
+          if (timedOutPlayer && !timedOutPlayer.isBot && !timedOutPlayer.resigned) {
+            setAutoPlay((s) => {
+              const ns = new Set(s);
+              ns.add(timedOutPlayer.id);
+              return ns;
+            });
+            setShowAutoPlayBanner(true);
+          }
+          // Avanca vez (o auto-play trata da proxima vez deste jogador)
           const next = nextActiveIdx(prev.players, prev.currentPlayerIndex);
-          const ns = { ...prev, currentPlayerIndex: next, turnTimer: 30, diceValue: null, phase: 'rolling' as const, consecutiveSixes: 0 };
+          const ns = { ...prev, currentPlayerIndex: next, turnTimer: 15, diceValue: null, phase: 'rolling' as const, consecutiveSixes: 0 };
           if (isMultiplayer) pushState(ns);
           return ns;
         }
         const ns = { ...prev, turnTimer: prev.turnTimer - 1 };
-        // don't push every tick — bandwidth waste
         return ns;
       });
     }, 1000);
@@ -401,6 +448,8 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       gameState.currentPlayerIndex,
       smartDiceConfigRef.current,
     );
+    localSoundRef.current = true;
+    playSound('dice-roll');
     setAnimatingDice(true);
     let count = 0;
     const animInterval = setInterval(() => {
@@ -420,7 +469,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
           let ns: GameState;
           if (movable.length === 0) {
             const next = nextActiveIdx(prev.players, prev.currentPlayerIndex);
-            ns = { ...prev, diceValue: finalValue, phase: 'rolling' as const, currentPlayerIndex: next, turnTimer: 30, consecutiveSixes: 0 };
+            ns = { ...prev, diceValue: finalValue, phase: 'rolling' as const, currentPlayerIndex: next, turnTimer: 15, consecutiveSixes: 0 };
           } else {
             ns = { ...prev, diceValue: finalValue, phase: 'moving' as const, turnTimer: 30 };
           }
@@ -439,10 +488,14 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
 
     const { newState, captured } = movePiece(gameState, gameState.currentPlayerIndex, pieceId, gameState.diceValue);
 
+    // Som imediato na accao — sincronizado com o toque
+    localSoundRef.current = true;
     if (captured) {
+      playSound('piece-capture');
       showNotification('CAPTURASTE UMA PEÇA!');
       addLog(cp.color, `${cp.name} CAPTUROU uma peça!`, true);
     } else {
+      playSound('piece-move');
       addLog(cp.color, `${cp.name} moveu uma peça`);
     }
 
@@ -459,12 +512,12 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     let ns: GameState;
     if (newConsecutiveSixes >= 3) {
       const next = nextActiveIdx(newState.players, newState.currentPlayerIndex);
-      ns = { ...newState, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: 0 };
+      ns = { ...newState, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 15, consecutiveSixes: 0 };
     } else if (gotSix || captured) {
-      ns = { ...newState, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: newConsecutiveSixes };
+      ns = { ...newState, diceValue: null, phase: 'rolling' as const, turnTimer: 15, consecutiveSixes: newConsecutiveSixes };
     } else {
       const next = nextActiveIdx(newState.players, newState.currentPlayerIndex);
-      ns = { ...newState, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: 0 };
+      ns = { ...newState, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 15, consecutiveSixes: 0 };
     }
     setGameState(ns);
     if (isMultiplayer) pushState(ns);
@@ -483,14 +536,15 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
       return;
     }
 
-    // Aviso explícito da perda da aposta
+    // Registar resign no servidor (analytics)
+    if (isMultiplayer && multiplayer?.gameId) {
+      try {
+        await api.games.resign(multiplayer.gameId);
+      } catch {}
+    }
     if (betAmount > 0) {
       toast.info(`Desististe — aposta de ${betAmount.toLocaleString()} Kz perdida.`);
     }
-
-    // Não há débito local — a aposta já foi debitada à entrada da sala.
-    // Quando o último jogador activo for declarado vencedor, o servidor
-    // credita o pot ao vencedor automaticamente (via settle no PATCH /games).
 
     const newPlayers = gameState.players.map((p) =>
       p.id === me.id ? { ...p, resigned: true } : p,
@@ -531,7 +585,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         currentPlayerIndex: nextIdx,
         diceValue: null,
         phase: 'rolling' as const,
-        turnTimer: 30,
+        turnTimer: 15,
         consecutiveSixes: 0,
       };
       setGameState(ns);
@@ -546,17 +600,78 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
   const nextTurn = useCallback(() => {
     setGameState((prev) => {
       const next = nextActiveIdx(prev.players, prev.currentPlayerIndex);
-      const ns = { ...prev, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 30, consecutiveSixes: 0 };
+      const ns = { ...prev, currentPlayerIndex: next, diceValue: null, phase: 'rolling' as const, turnTimer: 15, consecutiveSixes: 0 };
       if (isMultiplayer) pushState(ns);
       return ns;
     });
   }, [isMultiplayer, pushState]);
+
+  // Auto-play: quando um humano esta em auto-play, o bot AI joga por ele.
+  const autoPlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (gameState.phase === 'finished') return;
+    if (!currentPlayer || currentPlayer.isBot || currentPlayer.resigned) return;
+    if (!autoPlay.has(currentPlayer.id)) return;
+    if (isMultiplayer && !isBotDriver) return;
+
+    if (gameState.phase === 'rolling') {
+      autoPlayTimeoutRef.current = setTimeout(() => handleRollDice(), 600 + Math.random() * 800);
+    } else if (gameState.phase === 'moving' && gameState.diceValue) {
+      autoPlayTimeoutRef.current = setTimeout(() => {
+        const pieceId = botChoosePiece(currentPlayer, gameState.diceValue!, gameState);
+        if (pieceId >= 0) {
+          handleMovePiece(pieceId);
+        } else {
+          nextTurn();
+        }
+      }, 500 + Math.random() * 600);
+    }
+    return () => { if (autoPlayTimeoutRef.current) clearTimeout(autoPlayTimeoutRef.current); };
+  }, [gameState.currentPlayerIndex, gameState.phase, gameState.diceValue, autoPlay, isMultiplayer, isBotDriver, handleRollDice, handleMovePiece, nextTurn]);
 
   const movablePieces = gameState.phase === 'moving' && gameState.diceValue
     ? getMovablePieces(currentPlayer, gameState.diceValue)
     : [];
 
   const cellSize = 100 / 15;
+
+  // --- Waypoint system: rastreia posicoes anteriores para gerar caminho casa-a-casa ---
+  // Usa um ref "snapshot" que so e actualizado APOS o render via useEffect.
+  // Assim, durante o render actual, `prevPositionsRef` contem os valores do render anterior.
+  const prevPositionsRef = useRef<Map<string, number>>(new Map());
+  const pendingPositionsRef = useRef<Map<string, number>>(new Map());
+
+  // Copiar pending → prev APOS o render (layout effect seria melhor mas useEffect basta)
+  useEffect(() => {
+    prevPositionsRef.current = new Map(pendingPositionsRef.current);
+  });
+
+  /** Coordenadas de ecra para uma posicao interna do ludo. */
+  const screenPos = (pos: number, color: PlayerColor): { x: number; y: number } | null => {
+    if (pos < 0) return null;
+    if (pos >= 57) return { x: 7.5 * cellSize, y: 7.5 * cellSize };
+    if (pos >= 52) {
+      const idx = pos - 52;
+      const cell = HOME_STRETCH.find((c) => c.homeStretchColor === color && c.homeStretchIndex === idx);
+      if (cell) return { x: cell.col * cellSize + cellSize / 2, y: cell.row * cellSize + cellSize / 2 };
+      return { x: 7.5 * cellSize, y: 7.5 * cellSize };
+    }
+    const absPos = (pos + START_POSITIONS[color]) % 52;
+    const cell = BOARD_PATH.find((c) => c.absolutePosition === absPos);
+    if (cell) return { x: cell.col * cellSize + cellSize / 2, y: cell.row * cellSize + cellSize / 2 };
+    return { x: 50, y: 50 };
+  };
+
+  /** Gera waypoints entre oldPos e newPos (apenas avancos). */
+  const buildWaypoints = (oldPos: number, newPos: number, color: PlayerColor): Waypoint[] => {
+    if (oldPos < 0 || newPos <= oldPos) return [];
+    const pts: Waypoint[] = [];
+    for (let p = oldPos + 1; p < newPos && pts.length < 6; p++) {
+      const pt = screenPos(p, color);
+      if (pt) pts.push(pt);
+    }
+    return pts;
+  };
 
   const getPieceScreenPos = (piece: { position: number; color: PlayerColor; isFinished: boolean }) => {
     if (piece.isFinished) return { x: 7.5 * cellSize, y: 7.5 * cellSize };
@@ -573,11 +688,126 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
     return { x: 50, y: 50 };
   };
 
-  const timerPercent = gameState.turnTimer / 30;
+  const TURN_SECONDS = 15;
+  const timerPercent = gameState.turnTimer / TURN_SECONDS;
   const timerCircumference = 2 * Math.PI * 24;
+  const ringColor = timerPercent > 0.5 ? '#22c55e' : timerPercent > 0.2 ? '#facc15' : '#ef4444';
+  const isUrgent = gameState.turnTimer <= 5;
+
+  // ---------------------------------------------------------------------------
+  // Corner mapping — cada jogador no canto da sua cor (apos rotacao do board)
+  // Original: red=TL(0), blue=TR(1), green=BR(2), yellow=BL(3)
+  // Visual: 0=TL, 1=TR, 2=BR, 3=BL
+  // ---------------------------------------------------------------------------
+  const cornerPlayers = (() => {
+    const ORIG: Record<PlayerColor, number> = { red: 0, blue: 1, green: 2, yellow: 3 };
+    const steps = boardRotation / 90;
+    const result: (Player | undefined)[] = [undefined, undefined, undefined, undefined];
+    for (const p of gameState.players) {
+      const visual = (ORIG[p.color] + steps) % 4;
+      result[visual] = p;
+    }
+    return result; // [TL, TR, BR, BL]
+  })();
+
+  /** Widget de canto — avatar + nome + dado com timer ring (so na vez do jogador) */
+  const renderCorner = (player: Player | undefined, align: 'left' | 'right') => {
+    if (!player) return <div className="w-[100px]" />;
+
+    const idx = gameState.players.indexOf(player);
+    const isCurrent = idx === gameState.currentPlayerIndex && !player.resigned;
+    const isMe = player.id === myUserId;
+    const isInAutoPlay = autoPlay.has(player.id);
+    const canRollThis =
+      gameState.phase === 'rolling' && isCurrent && isMe && !animatingDice && !player.isBot && !isInAutoPlay;
+    const showDice = isCurrent && !player.resigned;
+
+    const handleClick = () => {
+      if (!canRollThis) return;
+      handleRollDice();
+    };
+
+    return (
+      <div
+        className={`flex items-center gap-1.5 transition-opacity ${
+          isCurrent ? '' : 'opacity-60'
+        } ${player.resigned ? 'grayscale opacity-30' : ''} ${
+          align === 'right' ? 'flex-row-reverse text-right' : ''
+        }`}
+      >
+        <PlayerAvatar
+          name={player.name}
+          color={player.color}
+          avatarUrl={player.avatarUrl}
+          size={38}
+          isActive={isCurrent}
+          isBot={player.isBot}
+          resigned={player.resigned}
+        />
+        <div className="leading-tight min-w-0">
+          <p
+            className={`text-[11px] font-bold truncate max-w-[80px] ${player.resigned ? 'line-through' : ''}`}
+            style={{ color: COLORS[player.color] }}
+          >
+            {isMe ? 'Tu' : player.name}
+          </p>
+          <p className={`text-[9px] uppercase tracking-wider font-bold ${
+            isCurrent ? 'text-amber-300' : 'text-muted-foreground'
+          }`}>
+            {player.resigned ? 'Saiu' : isCurrent ? 'A jogar...' : 'Aguarda'}
+          </p>
+        </div>
+        {showDice && (
+          <button
+            type="button"
+            onClick={handleClick}
+            disabled={!canRollThis}
+            className={`relative outline-none shrink-0 transition-transform ${
+              canRollThis
+                ? 'cursor-pointer hover:scale-110 active:scale-95 anim-pulse-glow'
+                : 'cursor-default'
+            }`}
+            style={{
+              filter: canRollThis
+                ? 'drop-shadow(0 0 14px #fbbf24cc)'
+                : `drop-shadow(0 0 4px ${ringColor}88)`,
+            }}
+          >
+            <div className="relative w-[52px] h-[52px]">
+              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 56 56">
+                <circle cx="28" cy="28" r="24" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
+                <circle
+                  cx="28" cy="28" r="24" fill="none"
+                  stroke={ringColor} strokeWidth="3" strokeLinecap="round"
+                  strokeDasharray={timerCircumference}
+                  strokeDashoffset={timerCircumference * (1 - timerPercent)}
+                  style={{ transition: 'stroke-dashoffset 1s linear, stroke 240ms' }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Dice value={gameState.diceValue || 1} isRolling={animatingDice} size={30} theme="gold" />
+              </div>
+            </div>
+            <span
+              className={`absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-mono font-extrabold px-1 rounded-sm ${
+                isUrgent ? 'animate-pulse' : ''
+              }`}
+              style={{
+                color: ringColor,
+                background: `${ringColor}1a`,
+                border: `1px solid ${ringColor}44`,
+              }}
+            >
+              {gameState.turnTimer}s
+            </span>
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 w-full max-w-[1200px] mx-auto lg:h-[calc(100vh-2rem)] relative pb-4">
+    <div className="flex flex-col lg:flex-row lg:gap-4 w-full lg:max-w-[1200px] mx-auto h-[100dvh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
       {/* Notification banner */}
       {notification && (
         <div className="absolute top-0 left-1/2 -translate-x-1/2 z-50 bg-yellow-500 text-black font-bold px-6 py-2 rounded-b-xl flex items-center gap-2 text-sm animate-bounce shadow-lg">
@@ -585,48 +815,28 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         </div>
       )}
 
-      {/* TOP — oponentes (estilo Ludo Star). User local fica em baixo. */}
-      <div className="flex lg:hidden items-stretch gap-2 px-1">
-        <div
-          className="flex items-center flex-wrap gap-x-3 gap-y-1 flex-1 min-w-0 rounded-xl px-3 py-2 border border-white/10"
-          style={{
-            background: 'rgba(0,0,0,0.55)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 14px rgba(0,0,0,0.35)',
-          }}
-        >
-          {gameState.players
-            .filter((p) => p.id !== myUserId)
-            .map((p) => {
-              const idx = gameState.players.indexOf(p);
-              const isCurrent = idx === gameState.currentPlayerIndex && !p.resigned;
-              return (
-                <PlayerSlot
-                  key={p.id}
-                  player={p}
-                  isCurrent={isCurrent}
-                  diceValue={gameState.diceValue}
-                  isRolling={isCurrent && animatingDice}
-                  size="sm"
-                />
-              );
-            })}
-        </div>
-        {betAmount > 0 && (
+      {/* POT fixo no topo (mobile) */}
+      {betAmount > 0 && (
+        <div className="flex lg:hidden justify-center pt-1">
           <div
-            className="rounded-xl px-3 py-2 flex flex-col items-center justify-center shrink-0 shadow"
+            className="rounded-full px-4 py-0.5 flex items-center gap-1.5 shadow"
             style={{
               background: 'var(--grad-pot)',
               boxShadow: '0 3px 10px rgba(245,158,11,0.30), inset 0 1px 0 rgba(255,255,255,0.4)',
             }}
           >
-            <span className="text-[9px] uppercase tracking-wider font-bold text-amber-950/85">Pot</span>
-            <span className="text-sm font-extrabold text-amber-950 leading-none mt-0.5">
-              {potTotal.toLocaleString()}
+            <span className="text-[8px] uppercase tracking-wider font-bold text-amber-950/85">Pot</span>
+            <span className="text-sm font-extrabold text-amber-950 leading-none">
+              {potTotal.toLocaleString()} Kz
             </span>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* TOP row — jogadores TL + TR (estilo Ludo Star) */}
+      <div className="flex lg:hidden items-end justify-between w-full px-1">
+        {renderCorner(cornerPlayers[0], 'left')}
+        {renderCorner(cornerPlayers[1], 'right')}
       </div>
 
       {/* LEFT SIDEBAR - Players (desktop) */}
@@ -692,11 +902,11 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         </div>
       </div>
 
-      {/* CENTER - Board + Dice */}
-      <div className="flex-1 flex flex-col items-center gap-3 min-w-0 w-full">
+      {/* CENTER - Board + corners + buttons */}
+      <div className="flex-1 flex flex-col items-center min-w-0 w-full min-h-0">
         {/* Board outer (mantém background + shadow; não roda) */}
         <div
-          className="relative w-full max-w-[540px] aspect-square rounded-2xl overflow-hidden"
+          className="relative w-full lg:max-w-[640px] aspect-square rounded-2xl lg:rounded-2xl overflow-hidden"
           style={{
             background: 'var(--grad-board)',
             boxShadow:
@@ -1054,7 +1264,8 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
                       movablePieces.includes(piece.id) &&
                       gameState.currentPlayerIndex === gameState.players.indexOf(player) &&
                       !player.isBot &&
-                      (!isMultiplayer || player.id === myUserId);
+                      (!isMultiplayer || player.id === myUserId) &&
+                      !autoPlay.has(player.id);
 
                     const isPlayerTurn =
                       !piece.isFinished &&
@@ -1065,15 +1276,29 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
                     else if (isMovable) state = 'movable';
                     else if (isPlayerTurn) state = 'turn';
 
+                    // Waypoints: gerar caminho casa-a-casa
+                    const pieceKey = `${player.color}-${piece.id}`;
+                    const prevPos = prevPositionsRef.current.get(pieceKey);
+                    const curPos = piece.position;
+                    // Gravar posicao actual (sera copiada para prev apos este render)
+                    pendingPositionsRef.current.set(pieceKey, curPos);
+
+                    let waypoints: Waypoint[] | undefined;
+                    if (prevPos !== undefined && curPos > prevPos && prevPos >= 0) {
+                      const wp = buildWaypoints(prevPos, curPos, player.color);
+                      if (wp.length > 0) waypoints = wp;
+                    }
+
                     return (
                       <GamePiece
-                        key={`${player.color}-${piece.id}`}
+                        key={pieceKey}
                         color={player.color}
                         cx={cx}
                         cy={cy}
                         r={r}
                         state={state}
                         onClick={isMovable ? () => handleMovePiece(piece.id) : undefined}
+                        waypoints={waypoints}
                       />
                     );
                   }),
@@ -1094,133 +1319,104 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
           </div>
         </div>
 
-        {/* USER slot — sempre o jogador local em baixo, ao estilo Ludo Star */}
-        {(() => {
-          const me = gameState.players.find((p) => p.id === myUserId);
-          const meIdx = me ? gameState.players.indexOf(me) : -1;
-          const isMyTurn = !!(me && meIdx === gameState.currentPlayerIndex && !me.resigned);
-          const canRoll =
-            gameState.phase === 'rolling' && isMyTurn && !animatingDice && !me?.isBot;
+        {/* BOTTOM row — jogadores BL + BR (estilo Ludo Star) */}
+        <div className="flex lg:hidden items-start justify-between w-full px-1 gap-1">
+          {renderCorner(cornerPlayers[3], 'left')}
+          {renderCorner(cornerPlayers[2], 'right')}
+        </div>
 
-          const ringColor =
-            timerPercent > 0.5 ? '#22c55e' : timerPercent > 0.2 ? '#facc15' : '#ef4444';
-          const isUrgent = gameState.turnTimer <= 5;
-
-          let statusText: string;
-          if (gameState.winner) statusText = 'Fim do jogo';
-          else if (currentPlayer?.isBot) statusText = `${currentPlayer.name} (bot) a jogar...`;
-          else if (isMyTurn) statusText = canRoll ? 'Toca no dado para lançar!' : 'A jogar...';
-          else statusText = `Vez de ${currentPlayer?.name ?? '...'}`;
-
-          const handleDiceClick = () => {
-            if (!canRoll) return;
-            playSound('button-click');
-            handleRollDice();
-          };
-
-          return (
-            <div
-              className="w-full max-w-[540px] flex flex-col items-center gap-2 py-2 px-3 rounded-xl border border-white/10"
+        {/* AUTO-PLAY banner — aparece quando o jogador entra em modo auto */}
+        {showAutoPlayBanner && myUserId && autoPlay.has(myUserId) && (
+          <div
+            className="w-full lg:max-w-[640px] rounded-xl px-4 py-2.5 flex items-center gap-3 border"
+            style={{
+              background: 'linear-gradient(135deg, rgba(139,92,246,0.25), rgba(168,85,247,0.15))',
+              borderColor: 'rgba(168,85,247,0.5)',
+              boxShadow: '0 4px 16px rgba(139,92,246,0.2)',
+            }}
+          >
+            <span className="text-lg">🤖</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-purple-200">
+                Sempre que perdes um turno, a jogada é feita automaticamente.
+              </p>
+              <p className="text-[10px] text-purple-300/70 mt-0.5">
+                Podes desativar o AUTO quando quiseres.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setAutoPlay((s) => {
+                  const ns = new Set(s);
+                  ns.delete(myUserId!);
+                  return ns;
+                });
+                setShowAutoPlayBanner(false);
+                toast.success('Modo AUTO desativado. Jogas tu agora!');
+              }}
+              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105 active:scale-95"
               style={{
-                background: 'rgba(0,0,0,0.55)',
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.40)',
+                background: 'rgba(168,85,247,0.35)',
+                border: '1px solid rgba(168,85,247,0.6)',
+                color: '#e9d5ff',
               }}
             >
-              <div className="flex items-center justify-between gap-3 w-full">
-                {/* User avatar + nome (esquerda) */}
-                <div className="flex items-center gap-2.5 min-w-0">
-                  {me ? (
-                    <PlayerAvatar
-                      name={me.name}
-                      color={me.color}
-                      avatarUrl={me.avatarUrl}
-                      size={52}
-                      isActive={isMyTurn}
-                      isBot={me.isBot}
-                      resigned={me.resigned}
-                    />
-                  ) : null}
-                  <div className="leading-tight min-w-0">
-                    <p
-                      className="text-sm font-bold truncate"
-                      style={{ color: me ? COLORS[me.color] : '#fff' }}
-                    >
-                      {me?.name ?? '—'}
-                    </p>
-                    <p
-                      className="text-[10px] uppercase tracking-wider font-bold"
-                      style={{ color: isMyTurn ? '#fcd34d' : '#94a3b8' }}
-                    >
-                      {statusText}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Dado clicável + timer ring (direita) */}
-                <button
-                  type="button"
-                  onClick={handleDiceClick}
-                  disabled={!canRoll}
-                  aria-label={canRoll ? 'Lançar dado' : statusText}
-                  className={`relative outline-none rounded-full p-1 transition-transform shrink-0 ${
-                    canRoll
-                      ? 'cursor-pointer hover:scale-[1.06] active:scale-95 anim-pulse-glow'
-                      : 'cursor-default'
-                  } ${isUrgent && !canRoll ? 'anim-pulse-glow' : ''}`}
-                  style={{
-                    filter: `drop-shadow(0 0 ${canRoll ? '20px' : isUrgent ? '12px' : '4px'} ${
-                      canRoll ? '#fbbf24' : ringColor
-                    }cc)`,
-                    transition: 'filter 240ms, transform 200ms',
-                  }}
-                >
-                  <div className="relative w-20 h-20">
-                    <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 56 56">
-                      <circle cx="28" cy="28" r="24" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="4" />
-                      <circle
-                        cx="28" cy="28" r="24" fill="none"
-                        stroke={ringColor} strokeWidth="4" strokeLinecap="round"
-                        strokeDasharray={timerCircumference}
-                        strokeDashoffset={timerCircumference * (1 - timerPercent)}
-                        style={{ transition: 'stroke-dashoffset 1s linear, stroke 240ms' }}
-                      />
-                    </svg>
-                    {canRoll && (
-                      <span
-                        aria-hidden
-                        className="absolute inset-0 rounded-full pointer-events-none"
-                        style={{ boxShadow: 'inset 0 0 0 2px rgba(251,191,36,0.55)' }}
-                      />
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Dice value={gameState.diceValue || 1} isRolling={animatingDice} size={42} theme="gold" />
-                    </div>
-                  </div>
-                </button>
-              </div>
-
-              {/* Badge do tempo */}
               <span
-                className={`text-[10px] font-mono font-extrabold px-2 py-0.5 rounded-md ${
-                  isUrgent ? 'animate-pulse' : ''
-                }`}
+                className="w-4 h-4 rounded border-2 flex items-center justify-center"
                 style={{
-                  color: ringColor,
-                  background: `${ringColor}1a`,
-                  border: `1px solid ${ringColor}55`,
-                  transition: 'color 240ms, background 240ms, border-color 240ms',
+                  borderColor: '#a855f7',
+                  background: 'rgba(168,85,247,0.5)',
                 }}
               >
-                {gameState.turnTimer}s
+                <span className="text-[10px] text-white font-bold">✓</span>
               </span>
-            </div>
-          );
-        })()}
+              AUTO
+            </button>
+          </div>
+        )}
 
-        {/* Linha de botões — EMOJI / CHAT / DESISTIR / OPÇÕES */}
-        <div className="flex items-center justify-center gap-2 w-full max-w-[540px] flex-wrap">
+        {/* Linha de botões — EMOJI / CHAT / AUTO / DESISTIR */}
+        <div className="flex items-center justify-center gap-2 w-full lg:max-w-[640px] flex-wrap">
+          {/* AUTO toggle button — sempre visivel para o jogador local */}
+          {myUserId && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setAutoPlay((s) => {
+                  const ns = new Set(s);
+                  if (ns.has(myUserId!)) {
+                    ns.delete(myUserId!);
+                    setShowAutoPlayBanner(false);
+                    toast.success('Modo AUTO desativado');
+                  } else {
+                    ns.add(myUserId!);
+                    setShowAutoPlayBanner(true);
+                    toast.info('Modo AUTO ativado — o bot joga por ti');
+                  }
+                  return ns;
+                });
+              }}
+              className={`gap-1.5 text-xs font-bold border-purple-500/50 transition-transform hover:scale-105 active:scale-95 shadow-md ${
+                autoPlay.has(myUserId)
+                  ? 'bg-purple-500/30 text-purple-200 ring-1 ring-purple-400/50'
+                  : 'bg-white/5 hover:bg-white/10 border-white/10'
+              }`}
+            >
+              <span
+                className="w-3.5 h-3.5 rounded border-2 flex items-center justify-center"
+                style={{
+                  borderColor: autoPlay.has(myUserId) ? '#a855f7' : '#64748b',
+                  background: autoPlay.has(myUserId) ? 'rgba(168,85,247,0.5)' : 'transparent',
+                }}
+              >
+                {autoPlay.has(myUserId) && (
+                  <span className="text-[8px] text-white font-bold leading-none">✓</span>
+                )}
+              </span>
+              AUTO
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -1254,20 +1450,12 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
             <Flag className="w-3.5 h-3.5" />
             DESISTIR
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-xs font-bold border-white/10 bg-white/5 hover:bg-white/10 hover:scale-105 active:scale-95 transition-transform shadow-md"
-          >
-            <Settings className="w-3.5 h-3.5" />
-            OPÇÕES
-          </Button>
         </div>
 
         {/* Quick emoji bar (separada do chat) */}
         {showEmojiBar && (
           <div
-            className="w-full max-w-[540px] rounded-xl p-2 border border-white/10 backdrop-blur"
+            className="w-full lg:max-w-[640px] rounded-xl p-2 border border-white/10 backdrop-blur"
             style={{ background: 'rgba(255,255,255,0.05)' }}
           >
             <div className="flex gap-1 overflow-x-auto">
@@ -1293,7 +1481,7 @@ export function LudoBoard({ players, betAmount = 0, balance, onBalanceChange, on
         )}
 
         {/* Chat — escondido por defeito em todos os ecrãs; só aparece ao clicar no botão CHAT */}
-        <div className={`w-full max-w-[540px] ${showChat ? 'block' : 'hidden'}`}>
+        <div className={`w-full lg:max-w-[640px] ${showChat ? 'block' : 'hidden'}`}>
           <GameChat
             players={gameState.players}
             currentUserId={myUserId || gameState.players.find((p) => !p.isBot)?.id || gameState.players[0].id}

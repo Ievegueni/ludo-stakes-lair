@@ -184,38 +184,133 @@ export function movePiece(
 }
 
 // Bot AI: choose best piece to move
+// Avalia cada peca movivel com um sistema de pontuacao para criar um bot
+// que parece humano — varia entre agressivo, defensivo e oportunista.
+
+function scorePieceMove(
+  player: Player,
+  pieceId: number,
+  diceValue: number,
+  state: GameState,
+  playerIndex: number,
+): number {
+  const piece = player.pieces[pieceId];
+  if (!piece) return -Infinity;
+
+  let score = 0;
+
+  // --- Sair de casa (6) ---
+  if (piece.position === -1) {
+    const piecesOut = player.pieces.filter((p) => p.position >= 0 && !p.isFinished).length;
+    // Mais valioso sair quando temos poucas pecas fora
+    score += piecesOut === 0 ? 60 : piecesOut === 1 ? 40 : 20;
+    return score;
+  }
+
+  // Simular o movimento para analise
+  const simState = JSON.parse(JSON.stringify(state)) as GameState;
+  const { newState, captured } = movePiece(simState, playerIndex, pieceId, diceValue);
+
+  // --- Capturar adversario (prioridade maxima) ---
+  if (captured) {
+    score += 80;
+  }
+
+  // --- Terminar peca (chegar ao fim) ---
+  const simPiece = newState.players[playerIndex].pieces[pieceId];
+  if (simPiece.isFinished) {
+    score += 90;
+  }
+
+  // --- Entrar na home stretch (seguro) ---
+  if (piece.position < 52 && simPiece.position >= 52) {
+    score += 50;
+  }
+
+  // --- Ir para posicao segura ---
+  if (piece.position >= 0 && piece.position <= 51) {
+    const newAbsPos = simPiece.position <= 51
+      ? (simPiece.position + START_POSITIONS[piece.color]) % 52
+      : -1;
+    if (newAbsPos >= 0 && SAFE_POSITIONS.includes(newAbsPos)) {
+      score += 25;
+    }
+  }
+
+  // --- Fugir de perigo (peca em risco de ser capturada) ---
+  if (piece.position >= 0 && piece.position <= 51) {
+    const absPos = getAbsolutePosition(piece);
+    if (!SAFE_POSITIONS.includes(absPos)) {
+      let inDanger = false;
+      for (const other of state.players) {
+        if (other.color === player.color) continue;
+        for (const op of other.pieces) {
+          if (op.position < 0 || op.position > 51 || op.isFinished) continue;
+          const otherAbs = getAbsolutePosition(op);
+          const dist = (absPos - otherAbs + 52) % 52;
+          if (dist >= 1 && dist <= 6) {
+            inDanger = true;
+            break;
+          }
+        }
+        if (inDanger) break;
+      }
+      if (inDanger) {
+        score += 35; // Fugir de perigo e valioso
+      }
+    }
+  }
+
+  // --- Progresso geral (preferir pecas mais avancadas) ---
+  if (piece.position >= 0) {
+    score += piece.position * 0.3;
+  }
+
+  // --- Evitar posicoes perigosas apos mover ---
+  if (simPiece.position >= 0 && simPiece.position <= 51) {
+    const newAbs = (simPiece.position + START_POSITIONS[piece.color]) % 52;
+    if (!SAFE_POSITIONS.includes(newAbs)) {
+      for (const other of state.players) {
+        if (other.color === player.color) continue;
+        for (const op of other.pieces) {
+          if (op.position < 0 || op.position > 51 || op.isFinished) continue;
+          const otherAbs = getAbsolutePosition(op);
+          const dist = (newAbs - otherAbs + 52) % 52;
+          if (dist >= 1 && dist <= 6) {
+            score -= 15; // Penalizar mover para posicao perigosa
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return score;
+}
+
 export function botChoosePiece(player: Player, diceValue: number, state: GameState): number {
   const movable = getMovablePieces(player, diceValue);
   if (movable.length === 0) return -1;
   if (movable.length === 1) return movable[0];
 
-  // Priority 1: Capture an opponent
-  for (const pieceId of movable) {
-    const { captured } = movePiece(
-      JSON.parse(JSON.stringify(state)),
-      state.players.indexOf(player),
-      pieceId,
-      diceValue
-    );
-    if (captured) return pieceId;
+  const playerIndex = state.players.indexOf(player);
+
+  // Pontuar cada peca
+  const scored = movable.map((id) => ({
+    id,
+    score: scorePieceMove(player, id, diceValue, state, playerIndex),
+  }));
+
+  // Ordenar por pontuacao (maior primeiro)
+  scored.sort((a, b) => b.score - a.score);
+
+  // Adicionar variacao humana: 15% de chance de escolher a 2a melhor opcao
+  // para o bot nao parecer perfeito
+  if (scored.length >= 2 && Math.random() < 0.15) {
+    return scored[1].id;
   }
 
-  // Priority 2: Move piece out of home
-  if (diceValue === 6) {
-    const homepiece = movable.find((id) => player.pieces[id].position === -1);
-    if (homepiece !== undefined) return homepiece;
-  }
-
-  // Priority 3: Move the most advanced piece
-  let bestId = movable[0];
-  let bestPos = -2;
-  for (const id of movable) {
-    if (player.pieces[id].position > bestPos) {
-      bestPos = player.pieces[id].position;
-      bestId = id;
-    }
-  }
-  return bestId;
+  return scored[0].id;
 }
 
 // Board cell coordinates for rendering (15x15 grid)

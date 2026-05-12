@@ -67,7 +67,7 @@ function buildInitialState(
     diceValue: null,
     isRolling: false,
     winner: null,
-    turnTimer: 30,
+    turnTimer: 15,
     consecutiveSixes: 0,
     phase: 'rolling',
   };
@@ -442,6 +442,78 @@ app.post('/:id/chat', async (c) => {
       gift_price: inserted?.gift_price === null ? null : Number(inserted?.gift_price),
     },
   });
+});
+
+// --- Resign ---
+// Regista a desistencia (analytics) sem cooldown — o jogador pode voltar a jogar imediatamente.
+app.post('/:id/resign', async (c) => {
+  const u = c.get('user');
+  const id = c.req.param('id');
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const gameRes = await client.query<{ state: GameState; room_id: string; settled: boolean }>(
+      'SELECT state, room_id, settled FROM games WHERE id = $1 FOR UPDATE',
+      [id],
+    );
+    const game = gameRes.rows[0];
+    if (!game) {
+      await client.query('ROLLBACK');
+      return c.json({ error: 'game not found' }, 404);
+    }
+    if (game.settled) {
+      await client.query('ROLLBACK');
+      return c.json({ error: 'game already finished' }, 400);
+    }
+
+    const inGame = game.state.players.some(
+      (p: any) => p.id === u.id && !p.isBot && !p.resigned,
+    );
+    if (!inGame) {
+      await client.query('ROLLBACK');
+      return c.json({ error: 'not in this game or already resigned' }, 400);
+    }
+
+    // Buscar bet_amount para o log
+    const roomRes = await client.query<{ bet_amount: string }>(
+      'SELECT bet_amount FROM rooms WHERE id = $1',
+      [game.room_id],
+    );
+    const betLost = Number(roomRes.rows[0]?.bet_amount ?? 0);
+
+    // Actualizar contagem (analytics only, sem cooldown)
+    await client.query(
+      `UPDATE profiles
+       SET resign_count = resign_count + 1,
+           last_resign_at = now()
+       WHERE id = $1`,
+      [u.id],
+    );
+
+    // Registar no log
+    await client.query(
+      'INSERT INTO resign_log (user_id, game_id, room_id, bet_lost) VALUES ($1, $2, $3, $4)',
+      [u.id, id, game.room_id, betLost],
+    );
+
+    await client.query('COMMIT');
+
+    return c.json({
+      ok: true,
+      resignStreak: 0,
+      cooldownMinutes: 0,
+      cooldownUntil: null,
+      betLost,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[resign]', err);
+    return c.json({ error: 'resign failed' }, 500);
+  } finally {
+    client.release();
+  }
 });
 
 export default app;

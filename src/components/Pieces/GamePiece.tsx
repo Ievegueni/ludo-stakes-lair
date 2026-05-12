@@ -1,23 +1,13 @@
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import type { PlayerColor } from '@/lib/ludo-engine';
 
-/**
- * Peça do Ludo — SVG único com:
- *  - corpo circular com gradient radial (definido em <defs> do SVG-pai com id `g-piece-<cor>`)
- *  - sombra elíptica inferior
- *  - coroa estilizada no topo
- *  - highlight (verniz) superior
- *  - halo pulsante quando movível
- *  - hitbox 60% maior quando movível
- *  - movimento via Framer Motion (spring)
- *
- * O componente é renderizado dentro de um `<svg viewBox="0 0 100 100">`
- * pelo que `cx`, `cy` e `r` são em "unidades de viewBox" (cellSize ≈ 6.66).
- *
- * Não altera lógica do jogo — apenas apresentação.
- */
-
 export type PieceState = 'idle' | 'turn' | 'movable' | 'finished';
+
+export interface Waypoint {
+  x: number;
+  y: number;
+}
 
 interface GamePieceProps {
   color: PlayerColor;
@@ -26,23 +16,84 @@ interface GamePieceProps {
   r: number;
   state: PieceState;
   onClick?: () => void;
+  waypoints?: Waypoint[];
 }
 
 const SHADOW = 'rgba(0,0,0,0.55)';
 
-export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) {
+// Tempo entre cada casa (ms). Ajustar aqui para mais rapido/lento.
+const STEP_DELAY = 180;
+
+export function GamePiece({ color, cx, cy, r, state, onClick, waypoints }: GamePieceProps) {
   const isMovable = state === 'movable';
   const isTurn = state === 'turn';
+
+  // Posicao visual actual (o que o framer-motion anima)
+  const [visualPos, setVisualPos] = useState({ x: cx, y: cy });
+  const queueRef = useRef<Waypoint[]>([]);
+  const processingRef = useRef(false);
+  const prevTargetRef = useRef(`${cx},${cy}`);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const processNext = useCallback(() => {
+    if (queueRef.current.length === 0) {
+      processingRef.current = false;
+      return;
+    }
+    processingRef.current = true;
+    const next = queueRef.current.shift()!;
+    setVisualPos(next);
+    timerRef.current = setTimeout(processNext, STEP_DELAY);
+  }, []);
+
+  useEffect(() => {
+    const targetKey = `${cx},${cy}`;
+    if (targetKey === prevTargetRef.current) return;
+    prevTargetRef.current = targetKey;
+
+    // Cancelar animacao em curso
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    processingRef.current = false;
+
+    const hasWaypoints = waypoints && waypoints.length > 0;
+
+    if (!hasWaypoints) {
+      // Sem waypoints — mover directo (spring animation do framer-motion)
+      queueRef.current = [];
+      setVisualPos({ x: cx, y: cy });
+      return;
+    }
+
+    // Com waypoints — enfileirar todos os pontos + destino final
+    queueRef.current = [...waypoints, { x: cx, y: cy }];
+    processNext();
+  }, [cx, cy, waypoints, processNext]);
+
+  // Cleanup no unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  // Transicao: rapida entre casas (waypoints), spring para saltos directos
+  const hasQueue = processingRef.current || queueRef.current.length > 0;
+  const transition = hasQueue
+    ? { duration: STEP_DELAY / 1000, ease: 'easeOut' as const }
+    : { type: 'spring' as const, stiffness: 280, damping: 22, mass: 0.7 };
 
   return (
     <motion.g
       initial={false}
-      animate={{ x: cx, y: cy }}
-      transition={{ type: 'spring', stiffness: 320, damping: 22, mass: 0.6 }}
+      animate={{ x: visualPos.x, y: visualPos.y }}
+      transition={transition}
       style={{ cursor: isMovable ? 'pointer' : 'default' }}
       onClick={onClick}
     >
-      {/* Sombra projectada por baixo da peça (independente do filter) */}
+      {/* Sombra */}
       <ellipse
         cx={0}
         cy={r * 0.78}
@@ -52,7 +103,7 @@ export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) 
         pointerEvents="none"
       />
 
-      {/* Halo pulsante quando movível */}
+      {/* Halo pulsante quando movivel */}
       {isMovable && (
         <motion.circle
           cx={0}
@@ -68,7 +119,7 @@ export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) 
         />
       )}
 
-      {/* Glow estático quando é a vez do jogador (não movível) */}
+      {/* Glow quando e a vez */}
       {isTurn && (
         <circle
           cx={0}
@@ -81,7 +132,7 @@ export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) 
         />
       )}
 
-      {/* Corpo principal — gradient radial via id no <defs> do parent svg */}
+      {/* Corpo principal */}
       <circle
         cx={0}
         cy={0}
@@ -91,7 +142,7 @@ export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) 
         strokeWidth={r * 0.08}
       />
 
-      {/* Anel interno claro (faux-3D) */}
+      {/* Anel interno */}
       <circle
         cx={0}
         cy={0}
@@ -102,7 +153,7 @@ export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) 
         pointerEvents="none"
       />
 
-      {/* Highlight superior (verniz) */}
+      {/* Highlight (verniz) */}
       <ellipse
         cx={-r * 0.32}
         cy={-r * 0.4}
@@ -112,7 +163,7 @@ export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) 
         pointerEvents="none"
       />
 
-      {/* Coroa estilizada (3 pontos) — escalada para o tamanho da peça */}
+      {/* Coroa */}
       <g
         transform={`translate(0, ${-r * 0.05}) scale(${r * 0.32})`}
         pointerEvents="none"
@@ -129,7 +180,7 @@ export function GamePiece({ color, cx, cy, r, state, onClick }: GamePieceProps) 
         <circle cx="0.7" cy="-0.7" r="0.13" fill="#f59e0b" />
       </g>
 
-      {/* Hitbox invisível maior — facilita toque em mobile */}
+      {/* Hitbox maior para mobile */}
       {isMovable && (
         <circle cx={0} cy={0} r={r * 1.7} fill="transparent" />
       )}

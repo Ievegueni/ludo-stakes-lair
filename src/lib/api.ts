@@ -286,6 +286,19 @@ export const api = {
       });
       return r.game;
     },
+    async resign(gameId: string) {
+      const r = await request<{
+        ok: boolean;
+        resignStreak: number;
+        cooldownMinutes: number;
+        cooldownUntil: string | null;
+        betLost: number;
+      }>(`/api/games/${gameId}/resign`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      return r;
+    },
   },
 
   settings: {

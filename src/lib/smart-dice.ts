@@ -70,20 +70,20 @@ export const DEFAULT_CONFIG: SmartDiceConfig = {
   enabled: true,
   mercy: {
     enabled: true,
-    turnsWithoutSixThreshold: 4,
-    maxBoostPercent: 18,
+    turnsWithoutSixThreshold: 3,  // comecar a ajudar mais cedo
+    maxBoostPercent: 45,           // boost muito mais forte — quase garante 6 apos ~7 jogadas
   },
   clutch: {
     enabled: true,
-    captureBoostPercent: 12,
-    finishBoostPercent: 10,
-    maxRange: 4,
+    captureBoostPercent: 14,
+    finishBoostPercent: 12,
+    maxRange: 5,
   },
   comeback: {
     enabled: true,
-    maxBoostPercent: 10,
+    maxBoostPercent: 12,
   },
-  manipulationRate: 0.35,
+  manipulationRate: 0.50,  // 50% das jogadas sao assistidas
   botBias: {
     enabled: false,
     scope: 'bot-games-only',
@@ -92,24 +92,54 @@ export const DEFAULT_CONFIG: SmartDiceConfig = {
 };
 
 // ---------------------------------------------------------------------------
-// Estado de tracking por jogador (nao persiste entre jogos)
+// Estado de tracking por jogador, isolado por gameId.
+// Cada jogo tem o seu proprio Map — history nunca contamina entre jogos.
 // ---------------------------------------------------------------------------
 
 interface PlayerDiceHistory {
   turnsWithoutSix: number;
 }
 
-const playerHistory = new Map<string, PlayerDiceHistory>();
+// gameId → (playerId → history)
+const gameHistories = new Map<string, Map<string, PlayerDiceHistory>>();
+let activeGameId: string | null = null;
 
-function getHistory(playerId: string): PlayerDiceHistory {
-  if (!playerHistory.has(playerId)) {
-    playerHistory.set(playerId, { turnsWithoutSix: 0 });
+function getGameMap(): Map<string, PlayerDiceHistory> {
+  const id = activeGameId ?? '__default__';
+  if (!gameHistories.has(id)) {
+    gameHistories.set(id, new Map());
   }
-  return playerHistory.get(playerId)!;
+  return gameHistories.get(id)!;
 }
 
+function getHistory(playerId: string): PlayerDiceHistory {
+  const map = getGameMap();
+  if (!map.has(playerId)) {
+    map.set(playerId, { turnsWithoutSix: 0 });
+  }
+  return map.get(playerId)!;
+}
+
+/** Define o jogo activo — toda a history subsequente fica isolada a este id. */
+export function setActiveGame(gameId: string): void {
+  activeGameId = gameId;
+}
+
+/** Limpa a history do jogo activo (ou de todos se nenhum estiver activo). */
 export function resetHistory(): void {
-  playerHistory.clear();
+  if (activeGameId) {
+    gameHistories.delete(activeGameId);
+  } else {
+    gameHistories.clear();
+  }
+  activeGameId = null;
+}
+
+/** Limpa histories de jogos antigos para evitar memory leak. */
+export function pruneOldGames(keepGameId?: string): void {
+  for (const id of gameHistories.keys()) {
+    if (id !== keepGameId) gameHistories.delete(id);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -219,9 +249,17 @@ export function smartRollDice(
   const history = getHistory(player.id);
 
   // --- Mercy: boost no 6 se nao sai ha muito tempo ---
+  // Escala exponencialmente: apos threshold, cada turno extra duplica a urgencia.
+  // Com threshold=3 e maxBoost=45:
+  //   3 turnos sem 6 → ~15% prob de 6 (vs 16.7% base)
+  //   5 turnos sem 6 → ~30% prob de 6
+  //   7 turnos sem 6 → ~50% prob de 6
+  //   9+ turnos sem 6 → ~62% prob de 6 (cap)
   if (config.mercy.enabled && history.turnsWithoutSix >= config.mercy.turnsWithoutSixThreshold) {
     const extraTurns = history.turnsWithoutSix - config.mercy.turnsWithoutSixThreshold;
-    const boostFactor = Math.min(extraTurns + 1, config.mercy.maxBoostPercent) / 100;
+    // Ramp progressivo: 0→0.2, 1→0.4, 2→0.6, 3→0.8, 4→1.0 (cap)
+    const ramp = Math.min((extraTurns + 1) / 5, 1.0);
+    const boostFactor = ramp * (config.mercy.maxBoostPercent / 100);
     weights[5] += 6 * boostFactor; // index 5 = face 6
   }
 

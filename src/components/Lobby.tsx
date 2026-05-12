@@ -40,7 +40,8 @@ function generateRandomName(): string {
   const last = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]!;
   return `${first} ${last}`;
 }
-const BET_AMOUNTS = [100, 500, 1000, 5000];
+const BET_AMOUNTS = [500, 1000, 5000];
+const MIN_BET = 500;
 
 interface LobbyProps {
   onStartGame: (
@@ -58,7 +59,9 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [tab, setTab] = useState<'rooms' | 'create' | 'join'>('rooms');
-  const [selectedBet, setSelectedBet] = useState(100);
+  const [selectedBet, setSelectedBet] = useState(500);
+  const [customBet, setCustomBet] = useState('');
+  const [showCustomBet, setShowCustomBet] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
   const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const [hasStarted, setHasStarted] = useState(false);
@@ -111,6 +114,10 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
 
   const createRoom = async () => {
     if (!user) return;
+    if (selectedBet < MIN_BET) {
+      toast.error(`Aposta mínima: ${MIN_BET.toLocaleString()} Kz`);
+      return;
+    }
     if (balance < selectedBet) {
       toast.error('Saldo insuficiente!');
       return;
@@ -658,11 +665,11 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
             <p className="text-sm font-bold text-foreground mb-2.5 uppercase tracking-wider">Valor da Aposta</p>
             <div className="grid grid-cols-2 gap-2">
               {BET_AMOUNTS.map((amount) => {
-                const sel = selectedBet === amount;
+                const sel = !showCustomBet && selectedBet === amount;
                 return (
                   <button
                     key={amount}
-                    onClick={() => setSelectedBet(amount)}
+                    onClick={() => { setSelectedBet(amount); setShowCustomBet(false); setCustomBet(''); }}
                     className="py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.02] active:scale-95"
                     style={
                       sel
@@ -684,7 +691,54 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
                   </button>
                 );
               })}
+              <button
+                onClick={() => setShowCustomBet(true)}
+                className="py-3 rounded-xl text-sm font-bold transition-all hover:scale-[1.02] active:scale-95"
+                style={
+                  showCustomBet
+                    ? {
+                        background: 'var(--grad-pot)',
+                        color: '#3f2a07',
+                        boxShadow: '0 4px 14px rgba(245,158,11,0.45), inset 0 1px 0 rgba(255,255,255,0.45)',
+                      }
+                    : {
+                        background: 'rgba(255,255,255,0.05)',
+                        color: '#fff',
+                        border: '1px solid rgba(255,255,255,0.10)',
+                        backdropFilter: 'blur(8px)',
+                        WebkitBackdropFilter: 'blur(8px)',
+                      }
+                }
+              >
+                Outro valor
+              </button>
             </div>
+            {showCustomBet && (
+              <div className="mt-2.5 flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_BET}
+                    step={100}
+                    value={customBet}
+                    onChange={(e) => {
+                      setCustomBet(e.target.value);
+                      const val = Number(e.target.value);
+                      if (val >= MIN_BET) setSelectedBet(val);
+                    }}
+                    placeholder={`Mín. ${MIN_BET.toLocaleString()} Kz`}
+                    className="w-full py-2.5 px-3 pr-10 rounded-xl text-sm font-bold bg-white/5 border border-white/10 text-white placeholder:text-white/40 outline-none focus:border-amber-500/50 transition-colors"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold">Kz</span>
+                </div>
+              </div>
+            )}
+            {showCustomBet && customBet && Number(customBet) < MIN_BET && (
+              <p className="text-xs text-destructive mt-1 font-bold">
+                Aposta mínima: {MIN_BET.toLocaleString()} Kz
+              </p>
+            )}
           </div>
 
           <div
@@ -750,7 +804,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
 
           <button
             onClick={createRoom}
-            disabled={balance < selectedBet}
+            disabled={balance < selectedBet || selectedBet < MIN_BET}
             className="w-full py-3 rounded-2xl font-extrabold uppercase tracking-wider text-amber-950 transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95"
             style={{
               background: 'var(--grad-roll-btn)',
