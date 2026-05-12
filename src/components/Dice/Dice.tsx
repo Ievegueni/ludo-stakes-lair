@@ -96,7 +96,7 @@ export function Dice({
         setRot([rx, ry]);
       };
       tumble();
-      tumbleRef.current = setInterval(tumble, 110);
+      tumbleRef.current = setInterval(tumble, 550);
     } else {
       // Pára: assenta na face do `value`. Garantimos que partimos de um
       // múltiplo exacto de 360 (orientação neutra) e somamos a rotação
@@ -114,7 +114,7 @@ export function Dice({
       setRot([finalX, finalY]);
       settleRef.current = setTimeout(() => {
         onRollComplete?.();
-      }, 700);
+      }, 1500);
     }
     return () => {
       if (tumbleRef.current) clearInterval(tumbleRef.current);
