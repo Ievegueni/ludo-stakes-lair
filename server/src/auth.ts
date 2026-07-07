@@ -1,10 +1,13 @@
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import type { Context, Next } from 'hono';
-import { one } from './db.js';
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import type { Context, Next } from "hono";
+import { one } from "./db.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me-in-prod';
-const TOKEN_TTL = '30d';
+const JWT_SECRET = process.env.JWT_SECRET || "dev-only-change-me-in-prod";
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET) {
+  throw new Error("[nanter-api] JWT_SECRET is required in production");
+}
+const TOKEN_TTL = "30d";
 
 export interface AuthUser {
   id: string;
@@ -37,23 +40,45 @@ export function verifyToken(token: string): AuthUser | null {
   }
 }
 
+// Token efémero só para o EventSource do realtime. Vai no URL (o EventSource
+// não suporta headers), por isso tem TTL curto e scope próprio — o token
+// principal de 30 dias nunca aparece em logs/histórico do browser.
+export function signRealtimeToken(user: AuthUser) {
+  return jwt.sign({ sub: user.id, phone: user.phone, scope: "realtime" }, JWT_SECRET, {
+    expiresIn: "5m",
+  });
+}
+
+export function verifyRealtimeToken(token: string): AuthUser | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as {
+      sub: string;
+      phone: string;
+      scope?: string;
+    };
+    if (decoded.scope !== "realtime") return null;
+    return { id: decoded.sub, phone: decoded.phone };
+  } catch {
+    return null;
+  }
+}
+
 export async function requireAuth(c: Context, next: Next) {
-  const header = c.req.header('Authorization');
-  let token = header?.startsWith('Bearer ') ? header.slice(7) : undefined;
-  if (!token) token = c.req.query('token');
-  if (!token) return c.json({ error: 'unauthorized' }, 401);
+  const header = c.req.header("Authorization");
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+  if (!token) return c.json({ error: "unauthorized" }, 401);
   const user = verifyToken(token);
-  if (!user) return c.json({ error: 'invalid token' }, 401);
+  if (!user) return c.json({ error: "invalid token" }, 401);
   const dbUser = await one<{ id: string; phone: string }>(
-    'SELECT id, phone FROM users WHERE id = $1',
+    "SELECT id, phone FROM users WHERE id = $1",
     [user.id],
   );
-  if (!dbUser) return c.json({ error: 'user not found' }, 401);
-  c.set('user', dbUser);
+  if (!dbUser) return c.json({ error: "user not found" }, 401);
+  c.set("user", dbUser);
   await next();
 }
 
-declare module 'hono' {
+declare module "hono" {
   interface ContextVariableMap {
     user: AuthUser;
   }

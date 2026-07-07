@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import confetti from 'canvas-confetti';
-import { Crown, Flag } from 'lucide-react';
-import { Trophy } from './Trophy';
-import { playSound } from '@/utils/sound';
-import type { Player, PlayerColor } from '@/lib/ludo-engine';
+import { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import confetti from "canvas-confetti";
+import { Crown, Flag } from "lucide-react";
+import { Trophy } from "./Trophy";
+import { playSound } from "@/utils/sound";
+import type { Player, PlayerColor } from "@/lib/ludo-engine";
 
 const COLOR_HEX: Record<PlayerColor, string> = {
-  red: '#ef4444',
-  blue: '#3b82f6',
-  green: '#22c55e',
-  yellow: '#facc15',
+  red: "#ef4444",
+  blue: "#3b82f6",
+  green: "#22c55e",
+  yellow: "#facc15",
 };
 
 interface VictoryModalProps {
@@ -34,7 +34,7 @@ function fireConfettiBurst() {
     gravity: 0.85,
     decay: 0.92,
     startVelocity: 35,
-    colors: ['#fde047', '#f59e0b', '#ec4899', '#22c55e', '#3b82f6', '#a855f7'],
+    colors: ["#fde047", "#f59e0b", "#ec4899", "#22c55e", "#3b82f6", "#a855f7"],
   };
   const fire = (particleRatio: number, opts: confetti.Options) =>
     confetti({ ...defaults, ...opts, particleCount: Math.floor(180 * particleRatio) });
@@ -61,20 +61,22 @@ export function VictoryModal({
   const [count, setCount] = useState(0);
   const playedRef = useRef(false);
 
-  // Confete + som — apenas quando abre
+  // Confete + som — apenas quando abre. Quem perdeu ouve o som de derrota
+  // e não recebe confetti (celebrar a derrota dos outros seria cruel).
   useEffect(() => {
     if (!open) {
       playedRef.current = false;
       return;
     }
-    fireConfettiBurst();
     if (!playedRef.current) {
-      playSound('victory');
+      playSound(isMe ? "victory" : "defeat");
       playedRef.current = true;
     }
+    if (!isMe) return;
+    fireConfettiBurst();
     const interval = setInterval(fireConfettiBurst, 2200);
     return () => clearInterval(interval);
-  }, [open]);
+  }, [open, isMe]);
 
   // Count-up do prémio (apenas se for jogo apostado E vencedor)
   useEffect(() => {
@@ -109,14 +111,14 @@ export function VictoryModal({
           <motion.div
             className="relative rounded-3xl p-8 text-center max-w-sm w-full overflow-hidden"
             style={{
-              background: 'linear-gradient(180deg, #1a1530 0%, #0e0b1f 100%)',
+              background: "linear-gradient(180deg, #1a1530 0%, #0e0b1f 100%)",
               boxShadow:
-                '0 0 0 1px rgba(251,191,36,0.45), 0 30px 80px rgba(251,191,36,0.30), inset 0 1px 0 rgba(255,255,255,0.08)',
+                "0 0 0 1px rgba(251,191,36,0.45), 0 30px 80px rgba(251,191,36,0.30), inset 0 1px 0 rgba(255,255,255,0.08)",
             }}
             initial={{ scale: 0.5, opacity: 0, y: 40 }}
             animate={{ scale: 1, opacity: 1, y: 0 }}
             exit={{ scale: 0.7, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+            transition={{ type: "spring", stiffness: 260, damping: 22 }}
           >
             {/* Glow rays atrás */}
             <span
@@ -124,7 +126,7 @@ export function VictoryModal({
               className="absolute inset-0 pointer-events-none"
               style={{
                 background:
-                  'radial-gradient(circle at center 30%, rgba(251,191,36,0.22), transparent 60%)',
+                  "radial-gradient(circle at center 30%, rgba(251,191,36,0.22), transparent 60%)",
               }}
             />
 
@@ -133,7 +135,7 @@ export function VictoryModal({
               className="relative mx-auto mb-3"
               style={{ width: 130, height: 130 }}
               animate={{ rotate: [0, -4, 4, -4, 0], y: [0, -4, 0] }}
-              transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+              transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
             >
               <Trophy size={130} />
             </motion.div>
@@ -141,21 +143,21 @@ export function VictoryModal({
             <h2
               className="text-3xl font-extrabold tracking-tight mb-2"
               style={{
-                background: 'var(--grad-pot)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
+                background: "var(--grad-pot)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
               }}
             >
-              {isMe ? '🎉 Vitória!' : 'Fim de Jogo'}
+              {isMe ? "🎉 Vitória!" : "Fim de Jogo"}
             </h2>
 
             <p className="text-muted-foreground mb-4">
               <span
                 className="font-extrabold"
-                style={{ color: winnerColor ? COLOR_HEX[winnerColor] : '#fde68a' }}
+                style={{ color: winnerColor ? COLOR_HEX[winnerColor] : "#fde68a" }}
               >
                 {winnerName}
-              </span>{' '}
+              </span>{" "}
               ganhou a partida
             </p>
 
@@ -163,8 +165,8 @@ export function VictoryModal({
               <div
                 className="rounded-2xl px-5 py-3 mb-4 mx-auto inline-flex items-center gap-2 relative"
                 style={{
-                  background: 'var(--grad-pot)',
-                  boxShadow: '0 0 24px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.45)',
+                  background: "var(--grad-pot)",
+                  boxShadow: "0 0 24px rgba(251,191,36,0.55), inset 0 1px 0 rgba(255,255,255,0.45)",
                 }}
               >
                 <Crown size={20} className="text-amber-950" strokeWidth={2.5} />
@@ -179,8 +181,8 @@ export function VictoryModal({
               <div
                 className="rounded-xl p-3 mb-5 text-left text-sm"
                 style={{
-                  background: 'rgba(255,255,255,0.04)',
-                  border: '1px solid rgba(255,255,255,0.08)',
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
                 }}
               >
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold mb-2">
@@ -195,23 +197,23 @@ export function VictoryModal({
                     let color: string;
                     if (p.isBot) {
                       delta = 0;
-                      label = '—';
-                      color = 'text-muted-foreground';
+                      label = "—";
+                      color = "text-muted-foreground";
                     } else if (isWinner) {
                       delta = pot ? Math.floor(pot * 0.95) : 0;
                       label = `+${delta.toLocaleString()} Kz`;
-                      color = 'text-emerald-400';
+                      color = "text-emerald-400";
                     } else {
                       delta = -betAmount;
                       label = `${delta.toLocaleString()} Kz`;
-                      color = 'text-rose-400';
+                      color = "text-rose-400";
                     }
                     return (
                       <li
                         key={p.id}
                         className={`flex items-center justify-between gap-2 px-2 py-1 rounded ${
-                          isWinner ? 'bg-amber-500/10' : ''
-                        } ${p.resigned ? 'opacity-50' : ''}`}
+                          isWinner ? "bg-amber-500/10" : ""
+                        } ${p.resigned ? "opacity-50" : ""}`}
                       >
                         <span className="flex items-center gap-2 min-w-0">
                           <span
@@ -219,9 +221,7 @@ export function VictoryModal({
                             style={{ backgroundColor: COLOR_HEX[p.color] }}
                           />
                           <span
-                            className={`font-semibold truncate ${
-                              p.resigned ? 'line-through' : ''
-                            }`}
+                            className={`font-semibold truncate ${p.resigned ? "line-through" : ""}`}
                             style={{ color: COLOR_HEX[p.color] }}
                           >
                             {p.name}
@@ -230,7 +230,9 @@ export function VictoryModal({
                             <span className="text-[9px] uppercase font-bold text-white/50">tu</span>
                           )}
                           {/* bots não são identificados visualmente — parecem humanos */}
-                          {isWinner && <Crown size={12} className="text-amber-400" strokeWidth={2.5} />}
+                          {isWinner && (
+                            <Crown size={12} className="text-amber-400" strokeWidth={2.5} />
+                          )}
                           {p.resigned && <Flag size={10} className="text-rose-400" />}
                         </span>
                         <span className={`font-extrabold tabular-nums shrink-0 ${color}`}>
@@ -251,8 +253,8 @@ export function VictoryModal({
               onClick={onClose}
               className="w-full py-3 rounded-xl font-extrabold uppercase tracking-wider text-amber-950 transition-transform hover:scale-[1.02] active:scale-95"
               style={{
-                background: 'var(--grad-roll-btn)',
-                boxShadow: '0 6px 20px rgba(245,158,11,0.45), inset 0 1px 0 rgba(255,255,255,0.45)',
+                background: "var(--grad-roll-btn)",
+                boxShadow: "0 6px 20px rgba(245,158,11,0.45), inset 0 1px 0 rgba(255,255,255,0.45)",
               }}
             >
               Voltar ao Lobby

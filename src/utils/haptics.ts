@@ -15,27 +15,27 @@
  * silêncio total. Se um dia for preciso separar, basta nova chave em LS.
  */
 
-import { isMuted } from './sound';
+import { isMuted } from "./sound";
 
-const HAPTIC_MUTE_KEY = 'nanter.haptics.muted';
+const HAPTIC_MUTE_KEY = "nanter.haptics.muted";
 
 /** Override próprio só para vibração (default: respeita o mute do som). */
 export function isHapticsMuted(): boolean {
-  if (typeof window === 'undefined') return false;
+  if (typeof window === "undefined") return false;
   const explicit = localStorage.getItem(HAPTIC_MUTE_KEY);
-  if (explicit !== null) return explicit === '1';
+  if (explicit !== null) return explicit === "1";
   return isMuted();
 }
 
 export function setHapticsMuted(value: boolean): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(HAPTIC_MUTE_KEY, value ? '1' : '0');
+  if (typeof window === "undefined") return;
+  localStorage.setItem(HAPTIC_MUTE_KEY, value ? "1" : "0");
 }
 
 /** Dispara vibração se o ambiente suporta e o user não silenciou. */
 function vibrate(pattern: number | number[]): void {
-  if (typeof navigator === 'undefined') return;
-  if (typeof navigator.vibrate !== 'function') return; // iOS Safari etc.
+  if (typeof navigator === "undefined") return;
+  if (typeof navigator.vibrate !== "function") return; // iOS Safari etc.
   if (isHapticsMuted()) return;
   try {
     navigator.vibrate(pattern);

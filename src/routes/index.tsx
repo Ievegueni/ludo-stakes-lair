@@ -19,7 +19,11 @@ export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
       { title: "NANTER - Aposta e Joga" },
-      { name: "description", content: "NANTER - Jogo de Ludo online com apostas em Kwanza. Joga com amigos ou bots e ganha dinheiro!" },
+      {
+        name: "description",
+        content:
+          "NANTER - Jogo de Ludo online com apostas em Kwanza. Joga com amigos ou bots e ganha dinheiro!",
+      },
     ],
   }),
   component: Index,
@@ -41,12 +45,12 @@ interface MultiplayerInfo {
 
 function Index() {
   const { user, loading, signOut } = useAuth();
-  const [view, setView] = useState<'lobby' | 'wallet' | 'game' | 'profile'>('lobby');
+  const [view, setView] = useState<"lobby" | "wallet" | "game" | "profile">("lobby");
   const [gamePlayers, setGamePlayers] = useState<GamePlayer[] | null>(null);
   const [gameBetAmount, setGameBetAmount] = useState(0);
   const [multiplayer, setMultiplayer] = useState<MultiplayerInfo | null>(null);
   const [balance, setBalance] = useState(0);
-  const [displayName, setDisplayName] = useState('Jogador');
+  const [displayName, setDisplayName] = useState("Jogador");
   const [muted, setMutedState] = useState<boolean>(() => isMuted());
 
   const toggleMute = () => {
@@ -74,17 +78,17 @@ function Index() {
 
       if (cancelled) return;
 
-      if (profileRes.status === 'fulfilled' && profileRes.value) {
+      if (profileRes.status === "fulfilled" && profileRes.value) {
         setDisplayName(profileRes.value.display_name);
       }
-      if (balanceRes.status === 'fulfilled') {
+      if (balanceRes.status === "fulfilled") {
         setBalance(balanceRes.value);
       }
 
       // Reconnect — só na primeira passagem
       if (!reconnectAttemptedRef.current) {
         reconnectAttemptedRef.current = true;
-        if (activeRes.status === 'fulfilled' && activeRes.value) {
+        if (activeRes.status === "fulfilled" && activeRes.value) {
           const game = activeRes.value;
           const stateAny = game.state as {
             winner?: string | null;
@@ -111,8 +115,8 @@ function Index() {
             initialState: game.state,
             version: game.version,
           });
-          setView('game');
-          toast.info('Reconectado ao jogo em curso');
+          setView("game");
+          toast.info("Reconectado ao jogo em curso");
         }
       }
 
@@ -140,7 +144,7 @@ function Index() {
             src="/logo.png"
             alt="NANTER"
             className="w-24 h-24 mx-auto mb-4 object-contain anim-float"
-            style={{ filter: 'drop-shadow(0 6px 20px rgba(124,58,237,0.55))' }}
+            style={{ filter: "drop-shadow(0 6px 20px rgba(124,58,237,0.55))" }}
             draggable={false}
           />
           <p className="text-white/85 font-bold tracking-wider uppercase text-sm">A carregar...</p>
@@ -158,13 +162,20 @@ function Index() {
     );
   }
 
-  if (view === 'game' && gamePlayers) {
-    const players = gamePlayers.map((p) =>
-      createPlayer(p.id, p.name, p.color, p.isBot)
-    );
+  if (view === "game" && gamePlayers) {
+    const players = gamePlayers.map((p) => createPlayer(p.id, p.name, p.color, p.isBot));
     return (
       <>
         <Toaster position="top-center" richColors />
+        {/* Mute flutuante — o header do lobby não existe durante o jogo */}
+        <button
+          onClick={toggleMute}
+          className="fixed top-2 right-2 z-50 text-white/70 hover:text-white transition-colors p-2 rounded-full bg-black/40 backdrop-blur-sm"
+          aria-label={muted ? "Activar som" : "Silenciar"}
+          title={muted ? "Activar som" : "Silenciar"}
+        >
+          {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+        </button>
         <div className="min-h-screen p-4 overflow-hidden">
           <LudoBoard
             players={players}
@@ -180,7 +191,7 @@ function Index() {
               loadBalance();
             }}
             onLeaveGame={() => {
-              setView('lobby');
+              setView("lobby");
               setGamePlayers(null);
               setMultiplayer(null);
               setGameBetAmount(0);
@@ -203,8 +214,8 @@ function Index() {
           className="sticky top-0 z-40 backdrop-blur-md"
           style={{
             background:
-              'linear-gradient(180deg, rgba(11,8,23,0.85) 0%, rgba(11,8,23,0.55) 60%, rgba(11,8,23,0) 100%)',
-            borderBottom: 'none',
+              "linear-gradient(180deg, rgba(11,8,23,0.85) 0%, rgba(11,8,23,0.55) 60%, rgba(11,8,23,0) 100%)",
+            borderBottom: "none",
           }}
         >
           <div className="max-w-lg mx-auto flex items-center justify-between px-4 py-3">
@@ -213,7 +224,7 @@ function Index() {
                 src="/logo.png"
                 alt="NANTER"
                 className="h-12 w-auto object-contain"
-                style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.55))' }}
+                style={{ filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.55))" }}
                 draggable={false}
               />
             </div>
@@ -221,9 +232,10 @@ function Index() {
               <div
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold text-sm"
                 style={{
-                  background: 'linear-gradient(135deg, #14532d 0%, #166534 100%)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 12px rgba(34,197,94,0.25)',
-                  color: '#bbf7d0',
+                  background: "linear-gradient(135deg, #14532d 0%, #166534 100%)",
+                  boxShadow:
+                    "inset 0 1px 0 rgba(255,255,255,0.15), 0 4px 12px rgba(34,197,94,0.25)",
+                  color: "#bbf7d0",
                 }}
               >
                 <WalletIcon className="w-3.5 h-3.5" />
@@ -232,8 +244,8 @@ function Index() {
               <button
                 onClick={toggleMute}
                 className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-full hover:bg-white/5"
-                aria-label={muted ? 'Activar som' : 'Silenciar'}
-                title={muted ? 'Activar som' : 'Silenciar'}
+                aria-label={muted ? "Activar som" : "Silenciar"}
+                title={muted ? "Activar som" : "Silenciar"}
               >
                 {muted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
               </button>
@@ -251,14 +263,14 @@ function Index() {
         {/* Content */}
         <main className="max-w-lg mx-auto px-4 py-6">
           {/* Welcome — text-shadow para legibilidade sobre a imagem */}
-          <div className="mb-6" style={{ textShadow: '0 2px 8px rgba(0,0,0,0.85)' }}>
+          <div className="mb-6" style={{ textShadow: "0 2px 8px rgba(0,0,0,0.85)" }}>
             <h1 className="text-2xl font-extrabold text-white tracking-tight">
               Olá, {displayName}! <span className="anim-float inline-block">👋</span>
             </h1>
             <p className="text-sm text-white/75 font-medium">Pronto para jogar?</p>
           </div>
 
-          {view === 'lobby' && (
+          {view === "lobby" && (
             <Lobby
               balance={balance}
               onBalanceRefresh={loadBalance}
@@ -266,30 +278,29 @@ function Index() {
                 setGamePlayers(players);
                 setGameBetAmount(bet);
                 setMultiplayer(mp ?? null);
-                setView('game');
+                setView("game");
               }}
             />
           )}
 
-          {view === 'wallet' && <Wallet />}
+          {view === "wallet" && <Wallet />}
 
-          {view === 'profile' && <Profile />}
+          {view === "profile" && <Profile />}
         </main>
 
         {/* Bottom nav — vidro escuro */}
         <nav
           className="fixed bottom-0 left-0 right-0 backdrop-blur-2xl border-t border-white/10"
           style={{
-            background:
-              'linear-gradient(180deg, rgba(11,8,23,0.55) 0%, rgba(11,8,23,0.92) 100%)',
-            boxShadow: '0 -8px 24px rgba(0,0,0,0.45)',
+            background: "linear-gradient(180deg, rgba(11,8,23,0.55) 0%, rgba(11,8,23,0.92) 100%)",
+            boxShadow: "0 -8px 24px rgba(0,0,0,0.45)",
           }}
         >
           <div className="max-w-lg mx-auto flex">
             {[
-              { key: 'lobby' as const, label: 'Jogar', icon: Gamepad2 },
-              { key: 'wallet' as const, label: 'Carteira', icon: WalletIcon },
-              { key: 'profile' as const, label: 'Perfil', icon: User },
+              { key: "lobby" as const, label: "Jogar", icon: Gamepad2 },
+              { key: "wallet" as const, label: "Carteira", icon: WalletIcon },
+              { key: "profile" as const, label: "Perfil", icon: User },
             ].map(({ key, label, icon: Icon }) => {
               const active = view === key;
               return (
@@ -297,15 +308,18 @@ function Index() {
                   key={key}
                   onClick={() => setView(key)}
                   className={`relative flex-1 flex flex-col items-center gap-1 py-3 transition-colors ${
-                    active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                    active ? "text-primary" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {active && (
                     <motion.span
                       layoutId="bottom-nav-indicator"
                       className="absolute top-0 left-1/2 -translate-x-1/2 h-0.5 w-12 rounded-full"
-                      style={{ background: 'var(--grad-roll-btn)', boxShadow: '0 0 12px rgba(251,191,36,0.6)' }}
-                      transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+                      style={{
+                        background: "var(--grad-roll-btn)",
+                        boxShadow: "0 0 12px rgba(251,191,36,0.6)",
+                      }}
+                      transition={{ type: "spring", stiffness: 380, damping: 30 }}
                     />
                   )}
                   <Icon className="w-5 h-5" />

@@ -23,8 +23,9 @@ export function AuthPhone() {
       toast.error("Número de telemóvel inválido");
       return;
     }
-    if (password.length < 4 || password.length > 5) {
-      toast.error("A senha deve ter 4 ou 5 caracteres");
+    // Só validamos o mínimo no registo — contas antigas podem ter senhas curtas
+    if (mode === "signup" && (password.length < 8 || password.length > 64)) {
+      toast.error("A senha deve ter entre 8 e 64 caracteres");
       return;
     }
 
@@ -59,12 +60,12 @@ export function AuthPhone() {
             src="/logo.png"
             alt="NANTER"
             className="w-44 h-44 mx-auto object-contain"
-            style={{ filter: 'drop-shadow(0 10px 30px rgba(124,58,237,0.65))' }}
+            style={{ filter: "drop-shadow(0 10px 30px rgba(124,58,237,0.65))" }}
             draggable={false}
           />
           <p
             className="text-white/85 font-medium"
-            style={{ textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}
+            style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}
           >
             Joga, aposta e ganha!
           </p>
@@ -88,14 +89,14 @@ export function AuthPhone() {
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
-              Senha <span className="text-xs text-muted-foreground">(máx. 5 caracteres)</span>
+              Senha <span className="text-xs text-muted-foreground">(mín. 8 caracteres)</span>
             </label>
             <Input
               type="password"
-              placeholder="•••••"
+              placeholder="••••••••"
               value={password}
-              maxLength={5}
-              onChange={(e) => setPassword(e.target.value.slice(0, 5))}
+              maxLength={64}
+              onChange={(e) => setPassword(e.target.value.slice(0, 64))}
               autoComplete={mode === "login" ? "current-password" : "new-password"}
             />
           </div>

@@ -1,4 +1,4 @@
-import { pool } from '../db.js';
+import { pool } from "../db.js";
 
 /**
  * Worker que limpa salas órfãs:
@@ -52,7 +52,7 @@ async function runOnce() {
       console.log(`[cleanup] forced ${r3.rowCount} ghost playing rooms to finished`);
     }
   } catch (err) {
-    console.error('[cleanup] error', err);
+    console.error("[cleanup] error", err);
   } finally {
     client.release();
   }
@@ -68,5 +68,5 @@ export function startRoomsCleanup() {
     runOnce();
     setInterval(runOnce, FIVE_MIN);
   }, 30_000);
-  console.log('[cleanup] rooms-cleanup worker scheduled (every 5 min)');
+  console.log("[cleanup] rooms-cleanup worker scheduled (every 5 min)");
 }

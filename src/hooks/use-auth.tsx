@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { api, type AuthUser } from '@/lib/api';
+import { useState, useEffect, useCallback } from "react";
+import { api, type AuthUser } from "@/lib/api";
 
 export function useAuth() {
   const [user, setUser] = useState<AuthUser | null>(null);

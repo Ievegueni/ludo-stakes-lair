@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import './Dice.css';
+import { useEffect, useRef, useState } from "react";
+import "./Dice.css";
 
 /**
  * Dado 3D em CSS puro — sem libs externas.
@@ -21,7 +21,7 @@ export interface DiceProps {
   isRolling: boolean;
   size?: number;
   onRollComplete?: () => void;
-  theme?: 'classic' | 'gold';
+  theme?: "classic" | "gold";
 }
 
 /**
@@ -54,17 +54,42 @@ const FACE_TRANSFORM: Record<number, (half: number) => string> = {
 /** Posições dos pips em coordenadas viewBox 100×100 (cada pip é desenhado por SVG). */
 const PIP_LAYOUTS: Record<number, [number, number][]> = {
   1: [[50, 50]],
-  2: [[27, 27], [73, 73]],
-  3: [[24, 24], [50, 50], [76, 76]],
-  4: [[27, 27], [73, 27], [27, 73], [73, 73]],
-  5: [[27, 27], [73, 27], [50, 50], [27, 73], [73, 73]],
-  6: [[27, 25], [73, 25], [27, 50], [73, 50], [27, 75], [73, 75]],
+  2: [
+    [27, 27],
+    [73, 73],
+  ],
+  3: [
+    [24, 24],
+    [50, 50],
+    [76, 76],
+  ],
+  4: [
+    [27, 27],
+    [73, 27],
+    [27, 73],
+    [73, 73],
+  ],
+  5: [
+    [27, 27],
+    [73, 27],
+    [50, 50],
+    [27, 73],
+    [73, 73],
+  ],
+  6: [
+    [27, 25],
+    [73, 25],
+    [27, 50],
+    [73, 50],
+    [27, 75],
+    [73, 75],
+  ],
 };
 
 function DiceFaceSvg({ value }: { value: number }) {
   const pips = PIP_LAYOUTS[value] || PIP_LAYOUTS[1];
   return (
-    <svg viewBox="0 0 100 100" width="78%" height="78%" style={{ display: 'block' }}>
+    <svg viewBox="0 0 100 100" width="78%" height="78%" style={{ display: "block" }}>
       {pips.map(([cx, cy], i) => (
         <circle key={i} cx={cx} cy={cy} r={9} className="nanter-dice-pip" />
       ))}
@@ -72,13 +97,7 @@ function DiceFaceSvg({ value }: { value: number }) {
   );
 }
 
-export function Dice({
-  value,
-  isRolling,
-  size = 64,
-  onRollComplete,
-  theme = 'gold',
-}: DiceProps) {
+export function Dice({ value, isRolling, size = 64, onRollComplete, theme = "gold" }: DiceProps) {
   const [rot, setRot] = useState<[number, number]>(SHOW_ROTATION[value] || [0, 0]);
   const tumbleRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const settleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -126,12 +145,9 @@ export function Dice({
   const half = size / 2;
 
   return (
-    <div
-      className="nanter-dice-scene"
-      style={{ width: size, height: size, position: 'relative' }}
-    >
+    <div className="nanter-dice-scene" style={{ width: size, height: size, position: "relative" }}>
       <div
-        className={`nanter-dice ${isRolling ? 'is-rolling' : ''} theme-${theme}`}
+        className={`nanter-dice ${isRolling ? "is-rolling" : ""} theme-${theme}`}
         style={{
           width: size,
           height: size,

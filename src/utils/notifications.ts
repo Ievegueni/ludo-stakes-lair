@@ -10,14 +10,14 @@
  * para alertar quando o jogo está em background.
  */
 
-const STORAGE_KEY = 'nanter.notifications.askedOnce';
+const STORAGE_KEY = "nanter.notifications.askedOnce";
 
 export function notificationsSupported(): boolean {
-  return typeof window !== 'undefined' && 'Notification' in window;
+  return typeof window !== "undefined" && "Notification" in window;
 }
 
 export function notificationsGranted(): boolean {
-  return notificationsSupported() && Notification.permission === 'granted';
+  return notificationsSupported() && Notification.permission === "granted";
 }
 
 /**
@@ -26,18 +26,18 @@ export function notificationsGranted(): boolean {
  */
 export async function requestNotificationPermission(): Promise<boolean> {
   if (!notificationsSupported()) return false;
-  if (Notification.permission === 'granted') return true;
-  if (Notification.permission === 'denied') return false;
-  if (typeof window !== 'undefined' && localStorage.getItem(STORAGE_KEY) === '1') {
+  if (Notification.permission === "granted") return true;
+  if (Notification.permission === "denied") return false;
+  if (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY) === "1") {
     // Já pediu antes nesta sessão (e a permissão pode ter ficado default — não insistir)
     return false;
   }
   try {
     const result = await Notification.requestPermission();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY, '1');
+    if (typeof window !== "undefined") {
+      localStorage.setItem(STORAGE_KEY, "1");
     }
-    return result === 'granted';
+    return result === "granted";
   } catch {
     return false;
   }
@@ -58,20 +58,22 @@ interface NotifyOptions {
  */
 export function notify(title: string, opts: NotifyOptions) {
   if (!notificationsGranted()) return;
-  if (typeof document !== 'undefined' && !document.hidden && !opts.whenVisible) {
+  if (typeof document !== "undefined" && !document.hidden && !opts.whenVisible) {
     return;
   }
   try {
     const n = new Notification(title, {
       body: opts.body,
-      icon: opts.icon || '/logo.png',
-      badge: '/logo.png',
+      icon: opts.icon || "/logo.png",
+      badge: "/logo.png",
       tag: opts.tag,
       requireInteraction: !!opts.requireInteraction,
       silent: false,
     });
     n.onclick = () => {
-      try { window.focus(); } catch {}
+      try {
+        window.focus();
+      } catch {}
       n.close();
     };
   } catch {

@@ -1,11 +1,9 @@
-import pg from 'pg';
+import pg from "pg";
 
 const { Pool } = pg;
 
 export const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ||
-    'postgres://nanter:nanter@127.0.0.1:54322/nanter',
+  connectionString: process.env.DATABASE_URL || "postgres://nanter:nanter@127.0.0.1:54322/nanter",
   max: 10,
 });
 

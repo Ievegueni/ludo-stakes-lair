@@ -4,7 +4,7 @@
  */
 export function Trophy({ size = 120 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 100 110" width={size} height={size} style={{ display: 'block' }}>
+    <svg viewBox="0 0 100 110" width={size} height={size} style={{ display: "block" }}>
       <defs>
         <linearGradient id="t-gold" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stopColor="#fef3c7" />
@@ -50,7 +50,16 @@ export function Trophy({ size = 120 }: { size?: number }) {
       />
 
       {/* Borda superior brilhante */}
-      <rect x="25" y="16" width="50" height="6" rx="1.2" fill="url(#t-gold-light)" stroke="#92400e" strokeWidth="0.5" />
+      <rect
+        x="25"
+        y="16"
+        width="50"
+        height="6"
+        rx="1.2"
+        fill="url(#t-gold-light)"
+        stroke="#92400e"
+        strokeWidth="0.5"
+      />
 
       {/* Estrela central */}
       <path
@@ -64,10 +73,27 @@ export function Trophy({ size = 120 }: { size?: number }) {
       <ellipse cx="38" cy="22" rx="9" ry="2.5" fill="rgba(255,255,255,0.55)" />
 
       {/* Coluna */}
-      <rect x="44" y="64" width="12" height="14" fill="url(#t-gold)" stroke="#7c2d12" strokeWidth="0.5" />
+      <rect
+        x="44"
+        y="64"
+        width="12"
+        height="14"
+        fill="url(#t-gold)"
+        stroke="#7c2d12"
+        strokeWidth="0.5"
+      />
 
       {/* Base superior */}
-      <rect x="36" y="78" width="28" height="6" rx="1.2" fill="url(#t-gold)" stroke="#7c2d12" strokeWidth="0.5" />
+      <rect
+        x="36"
+        y="78"
+        width="28"
+        height="6"
+        rx="1.2"
+        fill="url(#t-gold)"
+        stroke="#7c2d12"
+        strokeWidth="0.5"
+      />
 
       {/* Base inferior */}
       <rect x="30" y="84" width="40" height="8" rx="1.5" fill="#92400e" />

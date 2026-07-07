@@ -1,11 +1,11 @@
-import { motion } from 'framer-motion';
-import type { PlayerColor } from '@/lib/ludo-engine';
+import { motion } from "framer-motion";
+import type { PlayerColor } from "@/lib/ludo-engine";
 
 const COLORS: Record<PlayerColor, string> = {
-  red: '#ef4444',
-  blue: '#3b82f6',
-  green: '#22c55e',
-  yellow: '#facc15',
+  red: "#ef4444",
+  blue: "#3b82f6",
+  green: "#22c55e",
+  yellow: "#facc15",
 };
 
 interface BurstProps {
@@ -34,7 +34,7 @@ export function CaptureBurst({ cx, cy, color, onDone }: BurstProps) {
       animate={{ opacity: [1, 1, 0] }}
       transition={{ duration: 0.7, times: [0, 0.6, 1] }}
       onAnimationComplete={() => onDone?.()}
-      style={{ pointerEvents: 'none' }}
+      style={{ pointerEvents: "none" }}
     >
       {/* Flash central */}
       <motion.circle
@@ -44,7 +44,7 @@ export function CaptureBurst({ cx, cy, color, onDone }: BurstProps) {
         fill="#fff"
         initial={{ r: 1, opacity: 1 }}
         animate={{ r: 5, opacity: 0 }}
-        transition={{ duration: 0.45, ease: 'easeOut' }}
+        transition={{ duration: 0.45, ease: "easeOut" }}
       />
 
       {/* Anel expansivo */}
@@ -57,7 +57,7 @@ export function CaptureBurst({ cx, cy, color, onDone }: BurstProps) {
         strokeWidth={0.5}
         initial={{ r: 1, opacity: 0.85, strokeWidth: 0.8 }}
         animate={{ r: 7, opacity: 0, strokeWidth: 0.1 }}
-        transition={{ duration: 0.65, ease: 'easeOut' }}
+        transition={{ duration: 0.65, ease: "easeOut" }}
       />
 
       {/* Partículas radiais */}
@@ -76,7 +76,7 @@ export function CaptureBurst({ cx, cy, color, onDone }: BurstProps) {
             fill={COLORS[color]}
             initial={{ x: 0, y: 0, opacity: 1 }}
             animate={{ x: dx, y: dy, opacity: 0 }}
-            transition={{ duration: 0.6, ease: 'easeOut' }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
             style={{ filter: `drop-shadow(0 0 1px ${COLORS[color]})` }}
           />
         );
@@ -95,7 +95,7 @@ export function CaptureBurst({ cx, cy, color, onDone }: BurstProps) {
           strokeLinecap="round"
           initial={{ pathLength: 0, opacity: 0.95 }}
           animate={{ pathLength: 1, opacity: 0 }}
-          transition={{ duration: 0.4, ease: 'easeOut' }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
         />
       ))}
     </motion.g>

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
-import { api, type Transaction } from '@/lib/api';
-import { useAuth } from '@/hooks/use-auth';
-import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
+import { useState, useEffect } from "react";
+import { api, type Transaction } from "@/lib/api";
+import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import {
   Wallet as WalletIcon,
   Plus,
@@ -10,7 +10,7 @@ import {
   ArrowUpRight,
   Gift,
   History,
-} from 'lucide-react';
+} from "lucide-react";
 
 export function Wallet() {
   const { user } = useAuth();
@@ -25,10 +25,7 @@ export function Wallet() {
 
   const refresh = async () => {
     try {
-      const [bal, txs] = await Promise.all([
-        api.wallet.get(),
-        api.wallet.transactions(20),
-      ]);
+      const [bal, txs] = await Promise.all([api.wallet.get(), api.wallet.transactions(20)]);
       setBalance(bal);
       setTransactions(txs);
     } catch (err) {
@@ -39,7 +36,7 @@ export function Wallet() {
   const handleDeposit = async (amount: number) => {
     try {
       const r = await api.wallet.createTransaction({
-        type: 'deposit',
+        type: "deposit",
         amount,
         description: `Depósito simulado de ${amount.toLocaleString()} Kz`,
       });
@@ -47,20 +44,20 @@ export function Wallet() {
       toast.success(`+${amount.toLocaleString()} Kz`);
       refresh();
     } catch (err: any) {
-      toast.error(err?.message || 'Erro');
+      toast.error(err?.message || "Erro");
     }
   };
 
   const typeIcon = (type: string) => {
     switch (type) {
-      case 'deposit':
-      case 'win':
-      case 'refund':
+      case "deposit":
+      case "win":
+      case "refund":
         return <ArrowDownLeft className="w-4 h-4 text-primary" />;
-      case 'bet':
-      case 'withdraw':
+      case "bet":
+      case "withdraw":
         return <ArrowUpRight className="w-4 h-4 text-destructive" />;
-      case 'gift':
+      case "gift":
         return <Gift className="w-4 h-4 text-amber-500" />;
       default:
         return <History className="w-4 h-4 text-muted-foreground" />;
@@ -69,21 +66,28 @@ export function Wallet() {
 
   const typeLabel = (type: string) => {
     switch (type) {
-      case 'deposit': return 'Depósito';
-      case 'withdraw': return 'Saque';
-      case 'bet': return 'Aposta';
-      case 'win': return 'Ganho';
-      case 'refund': return 'Reembolso';
-      case 'gift': return 'Gift';
-      default: return type;
+      case "deposit":
+        return "Depósito";
+      case "withdraw":
+        return "Saque";
+      case "bet":
+        return "Aposta";
+      case "win":
+        return "Ganho";
+      case "refund":
+        return "Reembolso";
+      case "gift":
+        return "Gift";
+      default:
+        return type;
     }
   };
 
   const glass: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.05)',
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+    background: "rgba(255,255,255,0.05)",
+    backdropFilter: "blur(16px)",
+    WebkitBackdropFilter: "blur(16px)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)",
   };
 
   return (
@@ -93,11 +97,10 @@ export function Wallet() {
         className="relative overflow-hidden rounded-2xl p-6 border border-emerald-500/25"
         style={{
           background:
-            'linear-gradient(135deg, rgba(20,83,45,0.45) 0%, rgba(124,58,237,0.20) 60%, rgba(34,197,94,0.10) 100%)',
-          boxShadow:
-            'inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 30px rgba(34,197,94,0.18)',
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
+            "linear-gradient(135deg, rgba(20,83,45,0.45) 0%, rgba(124,58,237,0.20) 60%, rgba(34,197,94,0.10) 100%)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 30px rgba(34,197,94,0.18)",
+          backdropFilter: "blur(16px)",
+          WebkitBackdropFilter: "blur(16px)",
         }}
       >
         {/* shine sweep */}
@@ -105,9 +108,8 @@ export function Wallet() {
           aria-hidden
           className="absolute top-0 left-0 h-full w-1/3 pointer-events-none"
           style={{
-            background:
-              'linear-gradient(110deg, transparent, rgba(255,255,255,0.18), transparent)',
-            animation: 'nanter-coin-shine 5s ease-in-out infinite',
+            background: "linear-gradient(110deg, transparent, rgba(255,255,255,0.18), transparent)",
+            animation: "nanter-coin-shine 5s ease-in-out infinite",
           }}
         />
         <div className="flex items-center gap-2 text-emerald-300 mb-2 relative z-10">
@@ -115,7 +117,7 @@ export function Wallet() {
           <span className="text-xs font-extrabold uppercase tracking-wider">Saldo</span>
         </div>
         <p className="text-4xl font-extrabold text-white relative z-10 tracking-tight">
-          {balance.toLocaleString()}{' '}
+          {balance.toLocaleString()}{" "}
           <span className="text-lg text-emerald-200/70 font-bold">Kz</span>
         </p>
       </div>
@@ -132,13 +134,11 @@ export function Wallet() {
               onClick={() => handleDeposit(amount)}
               className="rounded-xl px-3 py-3 text-sm font-bold text-white transition-transform flex items-center justify-center gap-2 hover:scale-[1.03] active:scale-95"
               style={{
-                background:
-                  'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(255,255,255,0.05))',
-                border: '1px solid rgba(34,197,94,0.30)',
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                boxShadow:
-                  'inset 0 1px 0 rgba(255,255,255,0.10), 0 4px 12px rgba(0,0,0,0.25)',
+                background: "linear-gradient(135deg, rgba(34,197,94,0.18), rgba(255,255,255,0.05))",
+                border: "1px solid rgba(34,197,94,0.30)",
+                backdropFilter: "blur(10px)",
+                WebkitBackdropFilter: "blur(10px)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), 0 4px 12px rgba(0,0,0,0.25)",
               }}
             >
               <Plus className="w-4 h-4 text-emerald-300" />
@@ -156,7 +156,7 @@ export function Wallet() {
         >
           <History className="w-4 h-4" />
           <span>Histórico de Transações</span>
-          <span className="ml-auto text-xs">{showHistory ? '▾' : '▸'}</span>
+          <span className="ml-auto text-xs">{showHistory ? "▾" : "▸"}</span>
         </button>
 
         {showHistory && (
@@ -170,7 +170,7 @@ export function Wallet() {
                 <div
                   key={tx.id}
                   className="flex items-center gap-3 rounded-lg p-3 border border-white/5"
-                  style={{ background: 'rgba(255,255,255,0.04)' }}
+                  style={{ background: "rgba(255,255,255,0.04)" }}
                 >
                   {typeIcon(tx.type)}
                   <div className="flex-1 min-w-0">
@@ -179,12 +179,12 @@ export function Wallet() {
                   </div>
                   <span
                     className={`text-sm font-extrabold ${
-                      ['deposit', 'win', 'refund'].includes(tx.type)
-                        ? 'text-emerald-400'
-                        : 'text-rose-400'
+                      ["deposit", "win", "refund"].includes(tx.type)
+                        ? "text-emerald-400"
+                        : "text-rose-400"
                     }`}
                   >
-                    {['deposit', 'win', 'refund'].includes(tx.type) ? '+' : '-'}
+                    {["deposit", "win", "refund"].includes(tx.type) ? "+" : "-"}
                     {tx.amount.toLocaleString()} Kz
                   </span>
                 </div>

@@ -1,7 +1,7 @@
-import { Hono } from 'hono';
-import { z } from 'zod';
-import { one, query } from '../db.js';
-import { requireAuth } from '../auth.js';
+import { Hono } from "hono";
+import { z } from "zod";
+import { one, query } from "../db.js";
+import { requireAuth } from "../auth.js";
 
 /**
  * Endpoints de denúncias do JOGO.
@@ -17,7 +17,7 @@ import { requireAuth } from '../auth.js';
  *   - Unique partial index na DB impede duplicados pendentes para o mesmo par
  */
 
-const CATEGORIES = ['cheating', 'abuse', 'spam', 'harassment', 'other'] as const;
+const CATEGORIES = ["cheating", "abuse", "spam", "harassment", "other"] as const;
 
 const submitSchema = z.object({
   reportedId: z.string().uuid(),
@@ -46,23 +46,23 @@ function checkRate(reporterId: string): boolean {
 
 const reportsRoutes = new Hono();
 
-reportsRoutes.post('/', requireAuth, async (c) => {
-  const reporter = c.get('user');
+reportsRoutes.post("/", requireAuth, async (c) => {
+  const reporter = c.get("user");
   const body = await c.req.json().catch(() => null);
   const parsed = submitSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: 'invalid input', details: parsed.error.flatten() }, 400);
+    return c.json({ error: "invalid input", details: parsed.error.flatten() }, 400);
   }
   const { reportedId, gameId, category, reason } = parsed.data;
 
   if (reportedId === reporter.id) {
-    return c.json({ error: 'cannot report self' }, 400);
+    return c.json({ error: "cannot report self" }, 400);
   }
 
   // Rate limit
   if (!checkRate(reporter.id)) {
     return c.json(
-      { error: 'rate limited', message: 'Limite de denúncias por hora atingido.' },
+      { error: "rate limited", message: "Limite de denúncias por hora atingido." },
       429,
     );
   }
@@ -70,7 +70,7 @@ reportsRoutes.post('/', requireAuth, async (c) => {
   // Existência do reportedId
   const reported = await one<{ id: string }>(`SELECT id FROM users WHERE id = $1`, [reportedId]);
   if (!reported) {
-    return c.json({ error: 'reported user not found' }, 404);
+    return c.json({ error: "reported user not found" }, 404);
   }
 
   // Se gameId, valida que reporter ou reportedId esteve nessa sala
@@ -83,7 +83,7 @@ reportsRoutes.post('/', requireAuth, async (c) => {
       [gameId, reporter.id, reportedId],
     );
     if (!ok) {
-      return c.json({ error: 'game not associated with parties' }, 400);
+      return c.json({ error: "game not associated with parties" }, 400);
     }
   }
 
@@ -99,19 +99,19 @@ reportsRoutes.post('/', requireAuth, async (c) => {
     const msg = (err as Error).message;
     if (/idx_reports_unique_pending|duplicate key/.test(msg)) {
       return c.json(
-        { error: 'duplicate', message: 'Já tens uma denúncia pendente contra este jogador.' },
+        { error: "duplicate", message: "Já tens uma denúncia pendente contra este jogador." },
         409,
       );
     }
     if (/reports_no_self/.test(msg)) {
-      return c.json({ error: 'cannot report self' }, 400);
+      return c.json({ error: "cannot report self" }, 400);
     }
     throw err;
   }
 });
 
-reportsRoutes.get('/mine', requireAuth, async (c) => {
-  const me = c.get('user');
+reportsRoutes.get("/mine", requireAuth, async (c) => {
+  const me = c.get("user");
   const rows = await query<{
     id: string;
     reported_id: string;

@@ -14,8 +14,8 @@
  *   const value = smartRollDice(gameState, playerIndex);
  */
 
-import type { GameState, PlayerColor } from './ludo-engine';
-import { getAbsolutePosition, HOME_ENTRY, SAFE_POSITIONS } from './ludo-engine';
+import type { GameState, PlayerColor } from "./ludo-engine";
+import { getAbsolutePosition, HOME_ENTRY, SAFE_POSITIONS } from "./ludo-engine";
 
 // ---------------------------------------------------------------------------
 // Configuracao global — podes ajustar estes valores sem tocar na logica
@@ -29,16 +29,16 @@ export interface SmartDiceConfig {
   mercy: {
     enabled: boolean;
     turnsWithoutSixThreshold: number; // apos quantas jogadas sem 6 comecar a ajudar
-    maxBoostPercent: number;          // boost maximo na probabilidade do 6 (ex: 15 = +15%)
+    maxBoostPercent: number; // boost maximo na probabilidade do 6 (ex: 15 = +15%)
   };
 
   // Clutch: quando uma peca esta a 1-3 casas de comer outra ou de chegar
   // ao fim, ha uma leve probabilidade extra de sair o numero certo.
   clutch: {
     enabled: boolean;
-    captureBoostPercent: number;  // boost quando pode comer (ex: 12 = +12%)
-    finishBoostPercent: number;   // boost quando pode terminar (ex: 10 = +10%)
-    maxRange: number;             // distancia maxima em casas para activar (1-6)
+    captureBoostPercent: number; // boost quando pode comer (ex: 12 = +12%)
+    finishBoostPercent: number; // boost quando pode terminar (ex: 10 = +10%)
+    maxRange: number; // distancia maxima em casas para activar (1-6)
   };
 
   // Comeback: jogadores que estao atrasados recebem dados ligeiramente melhores.
@@ -61,7 +61,7 @@ export interface SmartDiceConfig {
   // scope = "all-games" → aplica sempre (afecta tambem jogos so humanos)
   botBias?: {
     enabled: boolean;
-    scope: 'bot-games-only' | 'all-games';
+    scope: "bot-games-only" | "all-games";
     targetRTP: number;
   };
 }
@@ -70,8 +70,8 @@ export const DEFAULT_CONFIG: SmartDiceConfig = {
   enabled: true,
   mercy: {
     enabled: true,
-    turnsWithoutSixThreshold: 3,  // comecar a ajudar mais cedo
-    maxBoostPercent: 45,           // boost muito mais forte — quase garante 6 apos ~7 jogadas
+    turnsWithoutSixThreshold: 3, // comecar a ajudar mais cedo
+    maxBoostPercent: 45, // boost muito mais forte — quase garante 6 apos ~7 jogadas
   },
   clutch: {
     enabled: true,
@@ -83,10 +83,10 @@ export const DEFAULT_CONFIG: SmartDiceConfig = {
     enabled: true,
     maxBoostPercent: 12,
   },
-  manipulationRate: 0.50,  // 50% das jogadas sao assistidas
+  manipulationRate: 0.5, // 50% das jogadas sao assistidas
   botBias: {
     enabled: false,
-    scope: 'bot-games-only',
+    scope: "bot-games-only",
     targetRTP: 1.0,
   },
 };
@@ -105,7 +105,7 @@ const gameHistories = new Map<string, Map<string, PlayerDiceHistory>>();
 let activeGameId: string | null = null;
 
 function getGameMap(): Map<string, PlayerDiceHistory> {
-  const id = activeGameId ?? '__default__';
+  const id = activeGameId ?? "__default__";
   if (!gameHistories.has(id)) {
     gameHistories.set(id, new Map());
   }
@@ -331,7 +331,7 @@ function applyBotBias(
   const hasBots = players.some((p) => p.isBot);
   const hasHumans = players.some((p) => !p.isBot && !p.resigned);
 
-  if (bias.scope === 'bot-games-only' && !(hasBots && hasHumans)) {
+  if (bias.scope === "bot-games-only" && !(hasBots && hasHumans)) {
     return; // exigimos pelo menos 1 bot E 1 humano
   }
 

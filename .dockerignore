@@ -1,0 +1,12 @@
+node_modules
+dist
+.tanstack
+.output
+.vinxi
+.nitro
+.wrangler
+*.log
+.env
+.env.*
+.DS_Store
+imagens

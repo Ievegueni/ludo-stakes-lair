@@ -1,24 +1,69 @@
-import { useState, useRef, useEffect } from 'react';
-import { MessageCircle, Send, Smile, Gift, X, Wallet as WalletIcon } from 'lucide-react';
-import { api } from '@/lib/api';
-import { toast } from 'sonner';
-import { playSound } from '@/utils/sound';
-import { notify } from '@/utils/notifications';
-import type { Player, PlayerColor } from '@/lib/ludo-engine';
+import { useState, useRef, useEffect } from "react";
+import { MessageCircle, Send, Smile, Gift, X, Wallet as WalletIcon } from "lucide-react";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import { playSound } from "@/utils/sound";
+import { notify } from "@/utils/notifications";
+import type { Player, PlayerColor } from "@/lib/ludo-engine";
 
 const COLORS: Record<PlayerColor, string> = {
-  red: '#ef4444',
-  blue: '#3b82f6',
-  green: '#22c55e',
-  yellow: '#eab308',
+  red: "#ef4444",
+  blue: "#3b82f6",
+  green: "#22c55e",
+  yellow: "#eab308",
 };
 
 // Os emojis rápidos estão na barra "EMOJI" do LudoBoard (botão dedicado).
 
 const EMOJI_PICKER = [
-  '😀', '😂', '🤣', '😎', '😍', '🥳', '😜', '🤪', '😏', '😒', '😭', '😱', '🥶', '🤯', '🤔', '🤨',
-  '😡', '🤬', '🤡', '💀', '👻', '👽', '🤖', '🎲', '🎯', '🏆', '🥇', '🥈', '🥉', '🔥', '💥', '⭐',
-  '👍', '👎', '👏', '🙌', '🤝', '💪', '🫡', '🤞', '✌️', '🤟', '🫶', '👑', '💎', '💰', '💸', '🚀',
+  "😀",
+  "😂",
+  "🤣",
+  "😎",
+  "😍",
+  "🥳",
+  "😜",
+  "🤪",
+  "😏",
+  "😒",
+  "😭",
+  "😱",
+  "🥶",
+  "🤯",
+  "🤔",
+  "🤨",
+  "😡",
+  "🤬",
+  "🤡",
+  "💀",
+  "👻",
+  "👽",
+  "🤖",
+  "🎲",
+  "🎯",
+  "🏆",
+  "🥇",
+  "🥈",
+  "🥉",
+  "🔥",
+  "💥",
+  "⭐",
+  "👍",
+  "👎",
+  "👏",
+  "🙌",
+  "🤝",
+  "💪",
+  "🫡",
+  "🤞",
+  "✌️",
+  "🤟",
+  "🫶",
+  "👑",
+  "💎",
+  "💰",
+  "💸",
+  "🚀",
 ];
 
 interface GiftItem {
@@ -29,28 +74,28 @@ interface GiftItem {
 }
 
 const GIFT_CATALOG: GiftItem[] = [
-  { id: 'rose', emoji: '🌹', name: 'Rosa', price: 50 },
-  { id: 'choco', emoji: '🍫', name: 'Chocolate', price: 100 },
-  { id: 'beer', emoji: '🍻', name: 'Cerveja', price: 200 },
-  { id: 'cake', emoji: '🎂', name: 'Bolo', price: 500 },
-  { id: 'fire', emoji: '🔥', name: 'Em Chamas', price: 750 },
-  { id: 'diamond', emoji: '💎', name: 'Diamante', price: 1000 },
-  { id: 'car', emoji: '🚗', name: 'Carro', price: 2000 },
-  { id: 'rocket', emoji: '🚀', name: 'Foguete', price: 5000 },
-  { id: 'crown', emoji: '👑', name: 'Coroa', price: 10000 },
+  { id: "rose", emoji: "🌹", name: "Rosa", price: 50 },
+  { id: "choco", emoji: "🍫", name: "Chocolate", price: 100 },
+  { id: "beer", emoji: "🍻", name: "Cerveja", price: 200 },
+  { id: "cake", emoji: "🎂", name: "Bolo", price: 500 },
+  { id: "fire", emoji: "🔥", name: "Em Chamas", price: 750 },
+  { id: "diamond", emoji: "💎", name: "Diamante", price: 1000 },
+  { id: "car", emoji: "🚗", name: "Carro", price: 2000 },
+  { id: "rocket", emoji: "🚀", name: "Foguete", price: 5000 },
+  { id: "crown", emoji: "👑", name: "Coroa", price: 10000 },
 ];
 
 const BOT_REACTIONS = [
-  '😎 Vamos lá!',
-  '🎲 Sorte minha!',
-  '🔥 Estou em chamas!',
-  '😂 Boa jogada!',
-  '👀 Cuidado...',
-  '💪 Não desistas!',
-  '🤖 Calculando...',
-  '🏆 Vou ganhar!',
-  '😱 Não!',
-  '👏 Bem jogado!',
+  "😎 Vamos lá!",
+  "🎲 Sorte minha!",
+  "🔥 Estou em chamas!",
+  "😂 Boa jogada!",
+  "👀 Cuidado...",
+  "💪 Não desistas!",
+  "🤖 Calculando...",
+  "🏆 Vou ganhar!",
+  "😱 Não!",
+  "👏 Bem jogado!",
 ];
 
 interface ChatMessage {
@@ -71,10 +116,16 @@ interface GameChatProps {
   gameId?: string;
 }
 
-export function GameChat({ players, currentUserId, balance, onBalanceChange, gameId }: GameChatProps) {
+export function GameChat({
+  players,
+  currentUserId,
+  balance,
+  onBalanceChange,
+  gameId,
+}: GameChatProps) {
   const isSync = !!gameId;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [showEmojis, setShowEmojis] = useState(false);
   const [showGifts, setShowGifts] = useState(false);
   const [selectedGift, setSelectedGift] = useState<GiftItem | null>(null);
@@ -94,17 +145,19 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
 
   // Permite que o LudoBoard envie um emoji rápido sem precisar de abrir
   // o input do chat. Disparado pelo botão EMOJI da barra.
+  // O ref garante que o listener (registado uma só vez) chama sempre a
+  // versão mais recente de sendMessage, sem re-registos nem closures velhas.
+  const sendMessageRef = useRef<(text: string) => Promise<void>>(async () => {});
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<string>).detail;
-      if (typeof detail === 'string' && detail.length > 0) {
-        void sendMessage(detail);
+      if (typeof detail === "string" && detail.length > 0) {
+        void sendMessageRef.current(detail);
       }
     };
-    window.addEventListener('nanter-quick-emoji', handler);
-    return () => window.removeEventListener('nanter-quick-emoji', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me, isSync, gameId]);
+    window.addEventListener("nanter-quick-emoji", handler);
+    return () => window.removeEventListener("nanter-quick-emoji", handler);
+  }, []);
 
   // Sync mode: load history + subscribe realtime
   useEffect(() => {
@@ -113,10 +166,10 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
 
     const mapRow = (r: any): ChatMessage => ({
       id: r.id,
-      authorId: r.user_id ?? '',
+      authorId: r.user_id ?? "",
       authorName: r.author_name,
       color: r.color as PlayerColor,
-      text: r.text ?? '',
+      text: r.text ?? "",
       timestamp: new Date(r.created_at).getTime(),
       gift: r.gift_emoji
         ? {
@@ -129,30 +182,33 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
         : undefined,
     });
 
-    api.chat.list(gameId).then((rows) => {
-      if (cancelled) return;
-      setMessages(rows.map(mapRow));
-    }).catch(() => {});
+    api.chat
+      .list(gameId)
+      .then((rows) => {
+        if (cancelled) return;
+        setMessages(rows.map(mapRow));
+      })
+      .catch(() => {});
 
     const off = api.realtime.subscribe((ev) => {
-      if (ev.table !== 'chat_messages') return;
-      if (ev.event !== 'INSERT') return;
+      if (ev.table !== "chat_messages") return;
+      if (ev.event !== "INSERT") return;
       if ((ev.row as any).game_id !== gameId) return;
       const msg = mapRow(ev.row);
       setMessages((prev) => {
         if (prev.find((m) => m.id === msg.id)) return prev;
         if (msg.authorId !== currentUserId) {
-          playSound(msg.gift ? 'gift-received' : 'chat-message');
+          playSound(msg.gift ? "gift-received" : "chat-message");
           // Notificar (apenas em background)
           if (msg.gift) {
             notify(`🎁 ${msg.authorName} enviou-te um gift`, {
               body: `${msg.gift.emoji} ${msg.gift.name}`,
-              tag: 'nanter-chat',
+              tag: "nanter-chat",
             });
           } else {
             notify(`💬 ${msg.authorName}`, {
-              body: msg.text || '...',
-              tag: 'nanter-chat',
+              body: msg.text || "...",
+              tag: "nanter-chat",
             });
           }
         }
@@ -163,14 +219,14 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
       cancelled = true;
       off();
     };
-  }, [isSync, gameId]);
+  }, [isSync, gameId, currentUserId]);
 
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || !me) return;
 
     if (isSync && gameId) {
-      setInput('');
+      setInput("");
       setShowEmojis(false);
       try {
         await api.chat.send(gameId, {
@@ -179,7 +235,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
           text: trimmed,
         });
       } catch (err: any) {
-        toast.error(err?.message || 'Erro ao enviar');
+        toast.error(err?.message || "Erro ao enviar");
       }
       return;
     }
@@ -194,7 +250,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, msg]);
-    setInput('');
+    setInput("");
     setShowEmojis(false);
 
     const bots = players.filter((p) => p.isBot);
@@ -219,6 +275,8 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
     }
   };
 
+  sendMessageRef.current = sendMessage;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     sendMessage(input);
@@ -227,7 +285,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
   const sendGift = async () => {
     if (!selectedGift || !selectedRecipient || !me || sendingGift) return;
     if (balance < selectedGift.price) {
-      toast.error('Saldo insuficiente!');
+      toast.error("Saldo insuficiente!");
       return;
     }
     const recipient = players.find((p) => p.id === selectedRecipient);
@@ -236,7 +294,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
     setSendingGift(true);
     try {
       const r = await api.wallet.createTransaction({
-        type: 'gift',
+        type: "gift",
         amount: selectedGift.price,
         description: `Gift ${selectedGift.emoji} ${selectedGift.name} → ${recipient.name}`,
       });
@@ -255,7 +313,12 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
               toColor: recipient.color,
             },
           });
-        } catch {}
+        } catch (err) {
+          // O débito já foi feito na wallet — a mensagem de chat é só visual,
+          // mas o utilizador deve saber que os outros podem não ter visto o gift.
+          console.error("gift chat message failed", err);
+          toast.warning("Gift enviado, mas a mensagem pode não ter chegado aos outros jogadores");
+        }
       } else {
         setMessages((prev) => [
           ...prev,
@@ -264,7 +327,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
             authorId: me.id,
             authorName: me.name,
             color: me.color,
-            text: '',
+            text: "",
             timestamp: Date.now(),
             gift: {
               emoji: selectedGift.emoji,
@@ -285,7 +348,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
       setSelectedRecipient(null);
       setShowGifts(false);
     } catch {
-      toast.error('Erro ao enviar gift');
+      toast.error("Erro ao enviar gift");
     } finally {
       setSendingGift(false);
     }
@@ -311,10 +374,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
           messages.map((m) => {
             const isMe = m.authorId === currentUserId;
             return (
-              <div
-                key={m.id}
-                className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}
-              >
+              <div key={m.id} className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}>
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <span
                     className="w-2 h-2 rounded-full"
@@ -331,7 +391,8 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
                     </span>
                     <div className="text-xs">
                       <p className="font-semibold text-foreground">
-                        {m.authorName} → <span style={{ color: COLORS[m.gift.toColor] }}>{m.gift.toName}</span>
+                        {m.authorName} →{" "}
+                        <span style={{ color: COLORS[m.gift.toColor] }}>{m.gift.toName}</span>
                       </p>
                       <p className="text-muted-foreground">
                         {m.gift.name} · {m.gift.price.toLocaleString()} Kz
@@ -342,8 +403,8 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
                   <div
                     className={`max-w-[80%] px-3 py-1.5 rounded-2xl text-sm break-words ${
                       isMe
-                        ? 'bg-primary text-primary-foreground rounded-br-sm'
-                        : 'bg-secondary text-foreground rounded-bl-sm'
+                        ? "bg-primary text-primary-foreground rounded-br-sm"
+                        : "bg-secondary text-foreground rounded-bl-sm"
                     }`}
                   >
                     {m.text}
@@ -396,7 +457,9 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
           type="button"
           onClick={() => setShowEmojis((s) => !s)}
           className={`p-2 rounded-lg transition-colors ${
-            showEmojis ? 'bg-primary/20 text-primary' : 'text-muted-foreground hover:text-foreground'
+            showEmojis
+              ? "bg-primary/20 text-primary"
+              : "text-muted-foreground hover:text-foreground"
           }`}
           aria-label="Abrir emojis"
         >
@@ -427,7 +490,7 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
         >
           <span
             className="text-9xl drop-shadow-[0_0_30px_rgba(255,200,80,0.8)]"
-            style={{ animation: 'gift-fly 2.5s ease-out forwards' }}
+            style={{ animation: "gift-fly 2.5s ease-out forwards" }}
           >
             {floatingGift.emoji}
           </span>
@@ -477,8 +540,8 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
                       onClick={() => setSelectedRecipient(p.id)}
                       className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
                         selectedRecipient === p.id
-                          ? 'border-primary bg-primary/10 text-foreground'
-                          : 'border-border bg-secondary text-muted-foreground'
+                          ? "border-primary bg-primary/10 text-foreground"
+                          : "border-border bg-secondary text-muted-foreground"
                       }`}
                     >
                       <span
@@ -504,15 +567,17 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
                     disabled={!affordable}
                     className={`flex flex-col items-center gap-1 p-3 rounded-xl border-2 transition-all ${
                       selected
-                        ? 'border-amber-400 bg-amber-400/10 scale-105'
+                        ? "border-amber-400 bg-amber-400/10 scale-105"
                         : affordable
-                          ? 'border-border bg-secondary/50 hover:border-amber-400/50'
-                          : 'border-border bg-secondary/20 opacity-40 cursor-not-allowed'
+                          ? "border-border bg-secondary/50 hover:border-amber-400/50"
+                          : "border-border bg-secondary/20 opacity-40 cursor-not-allowed"
                     }`}
                   >
                     <span className="text-3xl">{g.emoji}</span>
                     <span className="text-[10px] font-medium text-foreground">{g.name}</span>
-                    <span className="text-[10px] font-bold text-primary">{g.price.toLocaleString()} Kz</span>
+                    <span className="text-[10px] font-bold text-primary">
+                      {g.price.toLocaleString()} Kz
+                    </span>
                   </button>
                 );
               })}
@@ -522,15 +587,20 @@ export function GameChat({ players, currentUserId, balance, onBalanceChange, gam
             <div className="p-3 border-t border-border">
               <button
                 onClick={sendGift}
-                disabled={!selectedGift || !selectedRecipient || sendingGift || balance < (selectedGift?.price ?? 0)}
+                disabled={
+                  !selectedGift ||
+                  !selectedRecipient ||
+                  sendingGift ||
+                  balance < (selectedGift?.price ?? 0)
+                }
                 className="w-full py-3 rounded-xl bg-gradient-to-r from-amber-500 to-pink-500 text-white font-bold text-sm disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
               >
                 {!selectedGift
-                  ? 'Escolhe um gift'
+                  ? "Escolhe um gift"
                   : !selectedRecipient
-                    ? 'Escolhe o destinatário'
+                    ? "Escolhe o destinatário"
                     : sendingGift
-                      ? 'A enviar...'
+                      ? "A enviar..."
                       : `Enviar ${selectedGift.emoji} · ${selectedGift.price.toLocaleString()} Kz`}
               </button>
             </div>

@@ -1,6 +1,6 @@
 // Ludo game engine - handles all game logic
 
-export type PlayerColor = 'red' | 'blue' | 'green' | 'yellow';
+export type PlayerColor = "red" | "blue" | "green" | "yellow";
 
 export interface Piece {
   id: number;
@@ -27,7 +27,7 @@ export interface GameState {
   winner: string | null;
   turnTimer: number;
   consecutiveSixes: number;
-  phase: 'waiting' | 'rolling' | 'moving' | 'finished';
+  phase: "waiting" | "rolling" | "moving" | "finished";
 }
 
 // Starting positions for each color on the 52-cell main track
@@ -108,27 +108,28 @@ export function canMovePiece(piece: Piece, diceValue: number, color: PlayerColor
     // Check if passes through home entry
     const stepsToHome = 51 - relativePos;
     const remaining = diceValue - stepsToHome - 1;
-    return remaining >= 0 && (52 + remaining) <= 57;
+    return remaining >= 0 && 52 + remaining <= 57;
   }
 
   return true;
 }
 
 export function getMovablePieces(player: Player, diceValue: number): number[] {
-  return player.pieces
-    .filter((p) => canMovePiece(p, diceValue, player.color))
-    .map((p) => p.id);
+  return player.pieces.filter((p) => canMovePiece(p, diceValue, player.color)).map((p) => p.id);
 }
 
 export function movePiece(
   state: GameState,
   playerIndex: number,
   pieceId: number,
-  diceValue: number
+  diceValue: number,
 ): { newState: GameState; captured: boolean } {
   const newState = JSON.parse(JSON.stringify(state)) as GameState;
   const player = newState.players[playerIndex];
-  const piece = player.pieces[pieceId];
+  const piece = player?.pieces[pieceId];
+  if (!piece || piece.isFinished) {
+    return { newState: state, captured: false };
+  }
   let captured = false;
 
   if (piece.position === -1) {
@@ -177,7 +178,7 @@ export function movePiece(
   // Check win condition
   if (player.pieces.every((p) => p.isFinished)) {
     newState.winner = player.id;
-    newState.phase = 'finished';
+    newState.phase = "finished";
   }
 
   return { newState, captured };
@@ -229,9 +230,8 @@ function scorePieceMove(
 
   // --- Ir para posicao segura ---
   if (piece.position >= 0 && piece.position <= 51) {
-    const newAbsPos = simPiece.position <= 51
-      ? (simPiece.position + START_POSITIONS[piece.color]) % 52
-      : -1;
+    const newAbsPos =
+      simPiece.position <= 51 ? (simPiece.position + START_POSITIONS[piece.color]) % 52 : -1;
     if (newAbsPos >= 0 && SAFE_POSITIONS.includes(newAbsPos)) {
       score += 25;
     }
@@ -317,7 +317,7 @@ export function botChoosePiece(player: Player, diceValue: number, state: GameSta
 export interface CellCoord {
   row: number;
   col: number;
-  type: 'path' | 'home-red' | 'home-blue' | 'home-green' | 'home-yellow' | 'center' | 'safe';
+  type: "path" | "home-red" | "home-blue" | "home-green" | "home-yellow" | "center" | "safe";
   absolutePosition?: number;
   homeStretchColor?: PlayerColor;
   homeStretchIndex?: number;
@@ -335,21 +335,61 @@ export function generateBoardPath(): CellCoord[] {
   // This is a standard Ludo board layout on a 15x15 grid
   const pathCoords: [number, number][] = [
     // Red start area path (going up from row 6)
-    [6, 1], [6, 2], [6, 3], [6, 4], [6, 5], // 0-4
-    [5, 6], [4, 6], [3, 6], [2, 6], [1, 6], [0, 6], // 5-10
-    [0, 7], [0, 8], // 11-12
+    [6, 1],
+    [6, 2],
+    [6, 3],
+    [6, 4],
+    [6, 5], // 0-4
+    [5, 6],
+    [4, 6],
+    [3, 6],
+    [2, 6],
+    [1, 6],
+    [0, 6], // 5-10
+    [0, 7],
+    [0, 8], // 11-12
     // Blue start area path (going down from col 8)
-    [1, 8], [2, 8], [3, 8], [4, 8], [5, 8], // 13-17
-    [6, 9], [6, 10], [6, 11], [6, 12], [6, 13], [6, 14], // 18-23
-    [7, 14], [8, 14], // 24-25
+    [1, 8],
+    [2, 8],
+    [3, 8],
+    [4, 8],
+    [5, 8], // 13-17
+    [6, 9],
+    [6, 10],
+    [6, 11],
+    [6, 12],
+    [6, 13],
+    [6, 14], // 18-23
+    [7, 14],
+    [8, 14], // 24-25
     // Green start area path (going left from row 8)
-    [8, 13], [8, 12], [8, 11], [8, 10], [8, 9], // 26-30
-    [9, 8], [10, 8], [11, 8], [12, 8], [13, 8], [14, 8], // 31-36
-    [14, 7], [14, 6], // 37-38
+    [8, 13],
+    [8, 12],
+    [8, 11],
+    [8, 10],
+    [8, 9], // 26-30
+    [9, 8],
+    [10, 8],
+    [11, 8],
+    [12, 8],
+    [13, 8],
+    [14, 8], // 31-36
+    [14, 7],
+    [14, 6], // 37-38
     // Yellow start area path (going up from col 6)
-    [13, 6], [12, 6], [11, 6], [10, 6], [9, 6], // 39-43
-    [8, 5], [8, 4], [8, 3], [8, 2], [8, 1], [8, 0], // 44-49
-    [7, 0], [6, 0], // 50-51
+    [13, 6],
+    [12, 6],
+    [11, 6],
+    [10, 6],
+    [9, 6], // 39-43
+    [8, 5],
+    [8, 4],
+    [8, 3],
+    [8, 2],
+    [8, 1],
+    [8, 0], // 44-49
+    [7, 0],
+    [6, 0], // 50-51
   ];
 
   for (let i = 0; i < pathCoords.length; i++) {
@@ -357,7 +397,7 @@ export function generateBoardPath(): CellCoord[] {
     cells.push({
       row,
       col,
-      type: SAFE_POSITIONS.includes(i) ? 'safe' : 'path',
+      type: SAFE_POSITIONS.includes(i) ? "safe" : "path",
       absolutePosition: i,
     });
   }
@@ -371,19 +411,31 @@ export function generateHomeStretch(): CellCoord[] {
 
   // Red home stretch: row 7, col 1-5 (positions 52-56)
   for (let i = 0; i < 5; i++) {
-    cells.push({ row: 7, col: 1 + i, type: 'path', homeStretchColor: 'red', homeStretchIndex: i });
+    cells.push({ row: 7, col: 1 + i, type: "path", homeStretchColor: "red", homeStretchIndex: i });
   }
   // Blue home stretch: row 1-5, col 7 (positions 52-56)
   for (let i = 0; i < 5; i++) {
-    cells.push({ row: 1 + i, col: 7, type: 'path', homeStretchColor: 'blue', homeStretchIndex: i });
+    cells.push({ row: 1 + i, col: 7, type: "path", homeStretchColor: "blue", homeStretchIndex: i });
   }
   // Green home stretch: row 7, col 13-9 (positions 52-56)
   for (let i = 0; i < 5; i++) {
-    cells.push({ row: 7, col: 13 - i, type: 'path', homeStretchColor: 'green', homeStretchIndex: i });
+    cells.push({
+      row: 7,
+      col: 13 - i,
+      type: "path",
+      homeStretchColor: "green",
+      homeStretchIndex: i,
+    });
   }
   // Yellow home stretch: row 13-9, col 7 (positions 52-56)
   for (let i = 0; i < 5; i++) {
-    cells.push({ row: 13 - i, col: 7, type: 'path', homeStretchColor: 'yellow', homeStretchIndex: i });
+    cells.push({
+      row: 13 - i,
+      col: 7,
+      type: "path",
+      homeStretchColor: "yellow",
+      homeStretchIndex: i,
+    });
   }
 
   return cells;

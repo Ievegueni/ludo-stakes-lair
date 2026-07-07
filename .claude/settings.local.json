@@ -60,7 +60,27 @@
       "Bash(echo \"Game frontend: $?\")",
       "Bash(echo \"Game server: $?\")",
       "Bash(echo \"Server: $?\")",
-      "Bash(echo \"Frontend: $?\")"
+      "Bash(echo \"Frontend: $?\")",
+      "Bash(find /Users/ieveguenisantos/Desktop/Empresas/Futurix/Projectos/NANTER/ludo-stakes-lair -name \".env*\" -o -name \"*.env\" 2>/dev/null | head -20)",
+      "Bash(grep -rn \"catch.*{}\" /Users/ieveguenisantos/Desktop/Empresas/Futurix/Projectos/NANTER/ludo-stakes-lair/src /Users/ieveguenisantos/Desktop/Empresas/Futurix/Projectos/NANTER/ludo-stakes-lair/server/src 2>/dev/null | head -15)",
+      "Bash(docker ps --filter \"name=nanter-pg\" --format \"{{.Names}} {{.Status}}\" 2>&1)",
+      "Bash(sleep 3 && lsof -i :8080 -i :3000 2>/dev/null | grep LISTEN)",
+      "Bash(jobs -l 2>/dev/null; ps aux | grep -E \"concurrently|vite|tsx\" | grep -v grep | head -5)",
+      "Bash(lsof -i :8080 2>/dev/null | head -5; echo \"---\"; lsof -i :3000 2>/dev/null | head -5)",
+      "Bash(curl -s http://localhost:3000/api/auth/me -H \"Authorization: Bearer test\" 2>&1 | head -3)",
+      "Bash(lsof -i :3001 2>/dev/null | head -5)",
+      "Bash(curl -s http://localhost:3001/api/auth/me 2>&1 | head -3)",
+      "Bash(pkill -f \"concurrently\" 2>/dev/null; pkill -f \"vite dev\" 2>/dev/null; pkill -f \"tsx watch.*ludo\" 2>/dev/null; sleep 1; echo \"killed\")",
+      "Bash(sleep 3 && lsof -i :8080 -i :3001 2>/dev/null | grep LISTEN)",
+      "Bash(npx vite build 2>&1 | tail -15)",
+      "Bash(git add src/components/LudoBoard.tsx src/components/Lobby.tsx src/utils/sound.ts src/utils/haptics.ts src/lib/api.ts src/lib/ludo-engine.ts src/lib/smart-dice.ts src/components/Pieces/GamePiece.tsx server/src/routes/games.ts)",
+      "Bash(git commit -m \"$\\(cat <<'EOF'\nLudo Star layout, Web Audio sounds, remove cooldown, raise min bet\n\n- Ludo Star-style corner layout with per-player dice \\(visible only on turn\\)\n- Pot fixed at top, board fills screen with no wasted space\n- Web Audio API synthesized sounds \\(dice-roll, piece-move, capture, victory, etc.\\)\n- Fix sound sync: play sounds directly in action handlers, prevent duplicates\n- Remove anti-rage-quit cooldown system \\(resign freely\\)\n- Raise minimum bet to 500 Kz, add free bet input, remove 100 Kz option\n- Fix disappearing red piece \\(remove stale waypointsCache\\)\n- Add haptic feedback utilities\n- Smart dice: isolate history per game, prune old games\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git push origin main)",
+      "Bash(git add src/components/Dice/Dice.tsx src/components/Dice/Dice.css && git commit -m \"$\\(cat <<'EOF'\nSlow down dice roll animation for more realistic feel\n\n- Tumble interval: 110ms → 550ms\n- Tumble CSS transition: 120ms → 550ms ease-in-out\n- Settle CSS transition: 700ms → 1.5s with smoother curve\n- onRollComplete callback: 700ms → 1500ms\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(ls /Users/ieveguenisantos/Desktop/Empresas/Futurix/Projectos/NANTER/nanter-backoffice/.env* 2>/dev/null; cat /Users/ieveguenisantos/Desktop/Empresas/Futurix/Projectos/NANTER/nanter-backoffice/apps/api/.env* 2>/dev/null || echo \"No .env found in api\")",
+      "Bash(lsof -i :4000 -t)",
+      "Bash(lsof -i :4000 -P | head -5)",
+      "Bash(git *)"
     ]
   }
 }

@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
-import { api, type Transaction } from '@/lib/api';
-import { useAuth } from '@/hooks/use-auth';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { toast } from 'sonner';
+import { useState, useEffect, useRef } from "react";
+import { api, type Transaction } from "@/lib/api";
+import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 import {
   Camera,
   Check,
@@ -13,14 +13,14 @@ import {
   Gift,
   User,
   Loader2,
-} from 'lucide-react';
+} from "lucide-react";
 
 const MAX_AVATAR_BYTES = 400_000;
 
 export function Profile() {
   const { user } = useAuth();
-  const [displayName, setDisplayName] = useState('');
-  const [originalName, setOriginalName] = useState('');
+  const [displayName, setDisplayName] = useState("");
+  const [originalName, setOriginalName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [phone, setPhone] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -35,10 +35,7 @@ export function Profile() {
 
   const load = async () => {
     try {
-      const [profile, txs] = await Promise.all([
-        api.profiles.me(),
-        api.wallet.transactions(50),
-      ]);
+      const [profile, txs] = await Promise.all([api.profiles.me(), api.wallet.transactions(50)]);
       setDisplayName(profile.display_name);
       setOriginalName(profile.display_name);
       setAvatarUrl(profile.avatar_url);
@@ -52,20 +49,20 @@ export function Profile() {
   const handleSaveName = async () => {
     const trimmed = displayName.trim();
     if (!trimmed) {
-      toast.error('Nome não pode ficar vazio');
+      toast.error("Nome não pode ficar vazio");
       return;
     }
     if (trimmed.length > 24) {
-      toast.error('Nome muito longo (máx. 24)');
+      toast.error("Nome muito longo (máx. 24)");
       return;
     }
     setSavingName(true);
     try {
       await api.profiles.update({ display_name: trimmed });
       setOriginalName(trimmed);
-      toast.success('Nome actualizado');
+      toast.success("Nome actualizado");
     } catch {
-      toast.error('Erro ao guardar');
+      toast.error("Erro ao guardar");
     } finally {
       setSavingName(false);
     }
@@ -74,8 +71,8 @@ export function Profile() {
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      toast.error('Ficheiro inválido');
+    if (!file.type.startsWith("image/")) {
+      toast.error("Ficheiro inválido");
       return;
     }
     setUploadingAvatar(true);
@@ -84,11 +81,11 @@ export function Profile() {
     reader.onload = async () => {
       const img = new Image();
       img.onload = async () => {
-        const canvas = document.createElement('canvas');
+        const canvas = document.createElement("canvas");
         const size = 256;
         canvas.width = size;
         canvas.height = size;
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext("2d");
         if (!ctx) {
           setUploadingAvatar(false);
           return;
@@ -98,44 +95,44 @@ export function Profile() {
         const h = img.height * ratio;
         ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
         let quality = 0.85;
-        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        let dataUrl = canvas.toDataURL("image/jpeg", quality);
         while (dataUrl.length > MAX_AVATAR_BYTES && quality > 0.3) {
           quality -= 0.1;
-          dataUrl = canvas.toDataURL('image/jpeg', quality);
+          dataUrl = canvas.toDataURL("image/jpeg", quality);
         }
         try {
           await api.profiles.update({ avatar_url: dataUrl });
           setAvatarUrl(dataUrl);
-          toast.success('Foto actualizada');
+          toast.success("Foto actualizada");
         } catch {
-          toast.error('Erro ao guardar imagem');
+          toast.error("Erro ao guardar imagem");
         } finally {
           setUploadingAvatar(false);
         }
       };
       img.onerror = () => {
         setUploadingAvatar(false);
-        toast.error('Imagem inválida');
+        toast.error("Imagem inválida");
       };
       img.src = reader.result as string;
     };
     reader.onerror = () => {
       setUploadingAvatar(false);
-      toast.error('Erro a ler ficheiro');
+      toast.error("Erro a ler ficheiro");
     };
     reader.readAsDataURL(file);
   };
 
   const typeIcon = (type: string) => {
     switch (type) {
-      case 'deposit':
-      case 'win':
-      case 'refund':
+      case "deposit":
+      case "win":
+      case "refund":
         return <ArrowDownLeft className="w-4 h-4 text-primary" />;
-      case 'bet':
-      case 'withdraw':
+      case "bet":
+      case "withdraw":
         return <ArrowUpRight className="w-4 h-4 text-destructive" />;
-      case 'gift':
+      case "gift":
         return <Gift className="w-4 h-4 text-amber-500" />;
       default:
         return <History className="w-4 h-4 text-muted-foreground" />;
@@ -144,23 +141,30 @@ export function Profile() {
 
   const typeLabel = (type: string) => {
     switch (type) {
-      case 'deposit': return 'Depósito';
-      case 'withdraw': return 'Saque';
-      case 'bet': return 'Aposta';
-      case 'win': return 'Ganho';
-      case 'refund': return 'Reembolso';
-      case 'gift': return 'Gift enviado';
-      default: return type;
+      case "deposit":
+        return "Depósito";
+      case "withdraw":
+        return "Saque";
+      case "bet":
+        return "Aposta";
+      case "win":
+        return "Ganho";
+      case "refund":
+        return "Reembolso";
+      case "gift":
+        return "Gift enviado";
+      default:
+        return type;
     }
   };
 
-  const isCredit = (type: string) => ['deposit', 'win', 'refund'].includes(type);
+  const isCredit = (type: string) => ["deposit", "win", "refund"].includes(type);
 
   const glass: React.CSSProperties = {
-    background: 'rgba(255,255,255,0.05)',
-    backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)',
-    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)',
+    background: "rgba(255,255,255,0.05)",
+    backdropFilter: "blur(16px)",
+    WebkitBackdropFilter: "blur(16px)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 10px 30px rgba(0,0,0,0.35)",
   };
 
   return (
@@ -177,10 +181,10 @@ export function Profile() {
               className="w-24 h-24 rounded-full overflow-hidden flex items-center justify-center"
               style={{
                 background: avatarUrl
-                  ? '#0b0817'
-                  : 'linear-gradient(135deg, rgba(124,58,237,0.55), rgba(59,130,246,0.45))',
+                  ? "#0b0817"
+                  : "linear-gradient(135deg, rgba(124,58,237,0.55), rgba(59,130,246,0.45))",
                 boxShadow:
-                  '0 0 0 3px rgba(251,191,36,0.55), 0 0 0 6px rgba(251,191,36,0.18), 0 8px 24px rgba(124,58,237,0.45)',
+                  "0 0 0 3px rgba(251,191,36,0.55), 0 0 0 6px rgba(251,191,36,0.18), 0 8px 24px rgba(124,58,237,0.45)",
               }}
             >
               {avatarUrl ? (
@@ -212,9 +216,7 @@ export function Profile() {
             Alterar foto
           </button>
 
-          {phone && (
-            <p className="text-xs text-muted-foreground font-mono">{phone}</p>
-          )}
+          {phone && <p className="text-xs text-muted-foreground font-mono">{phone}</p>}
         </div>
 
         <div className="mt-5 space-y-2">
@@ -234,9 +236,9 @@ export function Profile() {
               disabled={savingName || displayName.trim() === originalName || !displayName.trim()}
               className="rounded-xl px-3 transition-transform flex items-center justify-center text-emerald-950 font-bold disabled:opacity-40 disabled:cursor-not-allowed hover:scale-[1.04] active:scale-95"
               style={{
-                background: 'linear-gradient(180deg, #4ade80, #16a34a)',
-                boxShadow: '0 4px 12px rgba(34,197,94,0.45), inset 0 1px 0 rgba(255,255,255,0.4)',
-                minWidth: '44px',
+                background: "linear-gradient(180deg, #4ade80, #16a34a)",
+                boxShadow: "0 4px 12px rgba(34,197,94,0.45), inset 0 1px 0 rgba(255,255,255,0.4)",
+                minWidth: "44px",
               }}
               aria-label="Guardar nome"
             >
@@ -268,21 +270,21 @@ export function Profile() {
               <div
                 key={tx.id}
                 className="flex items-center gap-3 rounded-lg p-3 border border-white/5"
-                style={{ background: 'rgba(255,255,255,0.04)' }}
+                style={{ background: "rgba(255,255,255,0.04)" }}
               >
                 {typeIcon(tx.type)}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-foreground">{typeLabel(tx.type)}</p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {tx.description || new Date(tx.created_at).toLocaleString('pt-PT')}
+                    {tx.description || new Date(tx.created_at).toLocaleString("pt-PT")}
                   </p>
                 </div>
                 <span
                   className={`text-sm font-extrabold ${
-                    isCredit(tx.type) ? 'text-emerald-400' : 'text-rose-400'
+                    isCredit(tx.type) ? "text-emerald-400" : "text-rose-400"
                   }`}
                 >
-                  {isCredit(tx.type) ? '+' : '-'}
+                  {isCredit(tx.type) ? "+" : "-"}
                   {tx.amount.toLocaleString()} Kz
                 </span>
               </div>

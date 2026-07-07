@@ -1,12 +1,12 @@
-import type { Context } from 'hono';
-import { streamSSE } from 'hono/streaming';
-import pg from 'pg';
+import type { Context } from "hono";
+import { streamSSE } from "hono/streaming";
+import pg from "pg";
 
 const { Client } = pg;
 
 interface RealtimeEvent {
   table: string;
-  event: 'INSERT' | 'UPDATE' | 'DELETE';
+  event: "INSERT" | "UPDATE" | "DELETE";
   row: Record<string, unknown>;
 }
 
@@ -19,37 +19,35 @@ export async function startRealtime() {
   if (started) return;
   started = true;
   const client = new Client({
-    connectionString:
-      process.env.DATABASE_URL ||
-      'postgres://nanter:nanter@127.0.0.1:54322/nanter',
+    connectionString: process.env.DATABASE_URL || "postgres://nanter:nanter@127.0.0.1:54322/nanter",
   });
   await client.connect();
-  await client.query('LISTEN nanter_realtime');
-  client.on('notification', (msg) => {
+  await client.query("LISTEN nanter_realtime");
+  client.on("notification", (msg) => {
     if (!msg.payload) return;
     try {
       const ev = JSON.parse(msg.payload) as RealtimeEvent;
       for (const l of listeners) l(ev);
     } catch (err) {
-      console.error('[realtime] bad payload', err);
+      console.error("[realtime] bad payload", err);
     }
   });
-  client.on('error', (err) => {
-    console.error('[realtime] client error', err);
+  client.on("error", (err) => {
+    console.error("[realtime] client error", err);
   });
-  console.log('[realtime] listening on nanter_realtime');
+  console.log("[realtime] listening on nanter_realtime");
 }
 
 export function realtimeHandler(c: Context) {
   return streamSSE(c, async (stream) => {
     const listener: Listener = (ev) => {
-      stream.writeSSE({ data: JSON.stringify(ev), event: 'change' }).catch(() => {});
+      stream.writeSSE({ data: JSON.stringify(ev), event: "change" }).catch(() => {});
     };
     listeners.add(listener);
-    await stream.writeSSE({ data: 'ok', event: 'ready' });
+    await stream.writeSSE({ data: "ok", event: "ready" });
 
     const ping = setInterval(() => {
-      stream.writeSSE({ data: '.', event: 'ping' }).catch(() => {});
+      stream.writeSSE({ data: ".", event: "ping" }).catch(() => {});
     }, 25_000);
 
     stream.onAbort(() => {

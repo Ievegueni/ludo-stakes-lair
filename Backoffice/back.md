@@ -2,11 +2,11 @@
 
 ## Contexto
 
-NANTER é uma plataforma online de Ludo multiplayer com sistema de apostas em 
-Kwanza (AOA), operando no mercado angolano. Este documento define o backoffice 
+NANTER é uma plataforma online de Ludo multiplayer com sistema de apostas em
+Kwanza (AOA), operando no mercado angolano. Este documento define o backoffice
 administrativo da plataforma.
 
-O jogo principal já está em desenvolvimento separado. Este backoffice é uma 
+O jogo principal já está em desenvolvimento separado. Este backoffice é uma
 aplicação **independente** que consome a mesma base de dados.
 
 ---
@@ -14,6 +14,7 @@ aplicação **independente** que consome a mesma base de dados.
 ## Objetivo
 
 Construir um backoffice web que permita:
+
 - Monitorizar a plataforma em tempo real
 - Gerir utilizadores, partidas e transações
 - Garantir conformidade com regulação angolana (BNA)
@@ -56,6 +57,7 @@ Construir um backoffice web que permita:
 ## Stack técnica
 
 ### Frontend
+
 - React 18 + Vite + TypeScript
 - Tailwind CSS
 - shadcn/ui (componentes UI)
@@ -68,6 +70,7 @@ Construir um backoffice web que permita:
 - date-fns (datas, locale pt-PT)
 
 ### Backend
+
 - Node.js + Fastify
 - PostgreSQL + Prisma (mesma DB do jogo)
 - Redis (cache, sessions)
@@ -77,6 +80,7 @@ Construir um backoffice web que permita:
 - Pino (logs)
 
 ### Auth
+
 - JWT com refresh tokens
 - 2FA obrigatório para todos os admins (TOTP via Google Authenticator)
 - Rate limiting (Redis)
@@ -84,6 +88,7 @@ Construir um backoffice web que permita:
 - Sessões com expiração curta (30 min idle)
 
 ### Infra
+
 - Subdomínio: `admin.nanter.com`
 - Deploy: Railway ou VM Ubuntu (Nginx + PM2)
 - SSL obrigatório
@@ -110,14 +115,14 @@ nanter-backoffice/
 
 ## Sistema de roles e permissões
 
-| Role | Permissões |
-|------|------------|
-| `SUPER_ADMIN` | Tudo. Único que pode criar/remover outros admins. |
-| `FINANCE` | Transações, saques, conciliação, relatórios financeiros. |
-| `SUPPORT` | Utilizadores (ver/suspender), denúncias, chat de suporte. |
-| `MARKETING` | Conteúdo, banners, campanhas, notificações em massa. |
-| `MODERATOR` | Denúncias, banimentos, replays de partidas. |
-| `AUDITOR` | Read-only em tudo. Não pode alterar nada. |
+| Role          | Permissões                                                |
+| ------------- | --------------------------------------------------------- |
+| `SUPER_ADMIN` | Tudo. Único que pode criar/remover outros admins.         |
+| `FINANCE`     | Transações, saques, conciliação, relatórios financeiros.  |
+| `SUPPORT`     | Utilizadores (ver/suspender), denúncias, chat de suporte. |
+| `MARKETING`   | Conteúdo, banners, campanhas, notificações em massa.      |
+| `MODERATOR`   | Denúncias, banimentos, replays de partidas.               |
+| `AUDITOR`     | Read-only em tudo. Não pode alterar nada.                 |
 
 - Cada admin tem um array de roles (pode ter múltiplos)
 - Middleware verifica permissões por rota
@@ -147,7 +152,7 @@ model User {
   lastLoginAt DateTime?
   lastIp      String?
   deviceId    String?
-  
+
   matches     Match[]
   transactions Transaction[]
   reports     Report[] @relation("ReporterReports")
@@ -179,7 +184,7 @@ model Match {
   endedAt     DateTime?
   winnerId    String?
   state       Json
-  
+
   players     MatchPlayer[]
   reports     Report[]
 }
@@ -211,7 +216,7 @@ model Transaction {
   processedAt   DateTime?
   approvedById  String?
   notes         String?
-  
+
   user          User     @relation(fields: [userId], references: [id])
 }
 
@@ -284,7 +289,7 @@ model Admin {
   lastLoginAt DateTime?
   lastIp      String?
   createdAt   DateTime @default(now())
-  
+
   actions     AdminAction[]
 }
 
@@ -307,9 +312,9 @@ model AdminAction {
   metadata    Json?
   ipAddress   String?
   createdAt   DateTime @default(now())
-  
+
   admin       Admin    @relation(fields: [adminId], references: [id])
-  
+
   @@index([adminId, createdAt])
   @@index([targetType, targetId])
 }
@@ -390,7 +395,7 @@ model SuspiciousActivity {
   reviewed    Boolean  @default(false)
   reviewedById String?
   createdAt   DateTime @default(now())
-  
+
   @@index([reviewed, score])
 }
 ```
@@ -402,17 +407,20 @@ model SuspiciousActivity {
 ### 1. Autenticação
 
 **Rotas:**
+
 - `POST /api/auth/login` — username + password (apenas admins)
 - `POST /api/auth/2fa/verify` — código TOTP
 - `POST /api/auth/refresh` — refresh token
 - `POST /api/auth/logout`
 
 **Fluxo:**
+
 1. Login com password → retorna token temporário
 2. Pede código 2FA → retorna access + refresh tokens
 3. Access token expira em 30min, refresh em 7 dias
 
 **Páginas:**
+
 - `/login` — formulário com username + password
 - `/login/2fa` — input do código de 6 dígitos
 - `/login/setup-2fa` — primeira vez (QR code)
@@ -423,6 +431,7 @@ model SuspiciousActivity {
 **Rota:** `/dashboard`
 
 **Cards de métricas (topo):**
+
 - Utilizadores online (atual)
 - Partidas em curso
 - Receita hoje (rake total)
@@ -431,12 +440,14 @@ model SuspiciousActivity {
 - Denúncias pendentes (com badge se > 0)
 
 **Gráficos:**
+
 - Utilizadores ativos (DAU) — últimos 30 dias
 - Receita diária — últimos 30 dias
 - Distribuição de partidas por modo (pie chart)
 - Top 10 utilizadores por volume jogado (mês)
 
 **Alertas críticos:**
+
 - Manutenção ativa
 - Falha em gateway de pagamento
 - Spike anormal de denúncias
@@ -449,6 +460,7 @@ model SuspiciousActivity {
 **Rota:** `/users`
 
 **Lista com:**
+
 - Avatar, displayName, telefone
 - Status (badge: ACTIVE, SUSPENDED, BANNED)
 - Saldo atual
@@ -457,6 +469,7 @@ model SuspiciousActivity {
 - Ações rápidas: ver, suspender, banir
 
 **Filtros:**
+
 - Status
 - VIP tier
 - Saldo (range)
@@ -466,6 +479,7 @@ model SuspiciousActivity {
 **Página de detalhe:** `/users/:id`
 
 Tabs:
+
 - **Perfil** — todos os dados, editar nível/VIP/notas
 - **Saldo** — saldo atual, histórico de ajustes, botão "Ajustar saldo" (modal com motivo obrigatório)
 - **Transações** — todas as transações do user
@@ -475,6 +489,7 @@ Tabs:
 - **Auditoria** — todas as ações de admin sobre este user
 
 **Ações:**
+
 - Suspender (1d, 7d, 30d, custom) com motivo
 - Banir permanentemente com motivo
 - Ajustar saldo (+/-) com motivo
@@ -483,6 +498,7 @@ Tabs:
 - Verificar identidade (KYC)
 
 **Endpoints:**
+
 - `GET /api/users` (paginado, filtros)
 - `GET /api/users/:id`
 - `PATCH /api/users/:id`
@@ -496,6 +512,7 @@ Tabs:
 **Rota:** `/transactions`
 
 **Lista com:**
+
 - Data/hora
 - User (link para perfil)
 - Tipo (badge colorido)
@@ -505,21 +522,25 @@ Tabs:
 - Referência
 
 **Filtros:**
+
 - Tipo, Status, Gateway, Range de valor, Range de data, User
 
 **Sub-rotas:**
+
 - `/transactions/withdrawals` — só saques
 - `/transactions/withdrawals/pending` — saques aguardando aprovação ⚠️ prioridade alta
 - `/transactions/deposits` — só depósitos
 - `/transactions/reconciliation` — conciliação com gateway
 
 **Aprovação de saque:**
+
 - Modal com detalhes do user (saldo, KYC status, histórico)
 - Verificação de IBAN
 - Botão "Aprovar"
 - Botão "Rejeitar" com motivo (devolver saldo)
 
 **Endpoints:**
+
 - `GET /api/transactions`
 - `GET /api/transactions/:id`
 - `POST /api/transactions/:id/approve`
@@ -535,6 +556,7 @@ Tabs:
 **Filtros:** Status, Modo, Stake range, Data, Tem denúncia
 
 **Página de detalhe:** `/matches/:id`
+
 - Replay visual da partida (turno por turno)
 - Logs de movimentos
 - Chat da partida
@@ -543,6 +565,7 @@ Tabs:
 - Botão "Marcar como suspeita"
 
 **Endpoints:**
+
 - `GET /api/matches`
 - `GET /api/matches/:id`
 - `GET /api/matches/:id/replay`
@@ -557,6 +580,7 @@ Tabs:
 **Filtros:** Status, Tipo, Data
 
 **Página de detalhe:** `/reports/:id`
+
 - Descrição do reporter
 - Evidências (chat, replay)
 - Histórico de denúncias do reportado
@@ -564,6 +588,7 @@ Tabs:
 - Ações: Ignorar, Avisar, Suspender, Banir, Invalidar partida
 
 **Endpoints:**
+
 - `GET /api/reports`
 - `GET /api/reports/:id`
 - `POST /api/reports/:id/resolve`
@@ -573,6 +598,7 @@ Tabs:
 **Rota:** `/audit-log`
 
 **Lista cronológica de todas as ações de admins:**
+
 - Quem, Quando, O quê, IP, Target
 
 **Filtros:** Admin, Tipo de ação, Data, Target
@@ -588,6 +614,7 @@ Apenas SUPER_ADMIN e AUDITOR veem tudo. Outros roles veem apenas as suas própri
 **Lista:** Username, Nome completo, Roles, Status, 2FA configurado, Último login, Último IP
 
 **Ações:**
+
 - **Criar novo admin** (modal):
   - Username (único)
   - Nome completo
@@ -604,6 +631,7 @@ Apenas SUPER_ADMIN e AUDITOR veem tudo. Outros roles veem apenas as suas própri
 Visível apenas para SUPER_ADMIN.
 
 **Endpoints:**
+
 - `GET /api/admins`
 - `POST /api/admins`
 - `PATCH /api/admins/:id`
@@ -612,6 +640,7 @@ Visível apenas para SUPER_ADMIN.
 - `POST /api/admins/:id/force-logout`
 
 **Bootstrap inicial:**
+
 - Primeiro SUPER_ADMIN criado via comando CLI: `pnpm admin:create-super`
 - O CLI pede username, nome completo e password
 - Gera registo na DB com `mustChangePassword = false`
@@ -624,28 +653,33 @@ Visível apenas para SUPER_ADMIN.
 A implementar **só depois do MVP estar estável em produção**.
 
 ### 9. Anti-fraude
+
 - Lista de utilizadores com score suspeito
 - Detetores: multi-account, win-rate anormal, conluio, padrões de jogo
 - Job diário a calcular scores
 
 ### 10. Configurações de jogo
+
 - Editar stakes min/max, comissão (rake), timeouts
 - Ativar/desativar modos
 - Modo manutenção
 
 ### 11. Banners e conteúdo
+
 - CRUD de banners do lobby
 - Upload de imagens
 - Agendamento (start/end date)
 - Reordenar drag-and-drop
 
 ### 12. Notificações em massa
+
 - Criar campanha (push + SMS + in-app)
 - Segmentação (todos, ativos 7d, inativos 30d, VIP, nível X+)
 - Preview, agendamento, relatório pós-envio
 - Integração com Futurix SMS
 
 ### 13. Suporte / chat
+
 - Inbox de mensagens de utilizadores
 - Resposta inline, templates
 - Marcar como resolvido, SLA tracking
@@ -673,6 +707,7 @@ A implementar **só depois do MVP estar estável em produção**.
 ```
 
 ### Visual
+
 - **Tema:** dark mode primário
 - **Cor primária:** azul profissional (#3B82F6)
 - **Cor de alerta:** vermelho (#EF4444)
@@ -682,6 +717,7 @@ A implementar **só depois do MVP estar estável em produção**.
 - **Tabelas:** zebra striping, hover destaque, sticky header
 
 ### Boas práticas
+
 - Toda ação destrutiva requer confirmação dupla com motivo obrigatório
 - Mostrar quem fez a última ação relevante
 - Tooltips em ícones
@@ -737,6 +773,7 @@ A implementar **só depois do MVP estar estável em produção**.
 **Entregável:** SUPER_ADMIN criado via CLI, login com 2FA funcional.
 
 ### Fase 2 — Dashboard e Users (Sprint 2)
+
 1. Dashboard com métricas reais
 2. Listagem de utilizadores com filtros
 3. Página de detalhe (todas as tabs)
@@ -744,18 +781,21 @@ A implementar **só depois do MVP estar estável em produção**.
 5. Suspensão e banimento
 
 ### Fase 3 — Transações (Sprint 3)
+
 1. Listagem de transações
 2. Aprovação de saques
 3. Conciliação com gateway
 4. Reprocessamento
 
 ### Fase 4 — Matches e Reports (Sprint 4)
+
 1. Listagem de partidas
 2. Replay
 3. Invalidação
 4. Sistema de denúncias
 
 ### Fase 5 — Auditoria, Admins e Polimento (Sprint 5)
+
 1. Audit log completo
 2. Sistema de roles refinado
 3. Gestão de admins (CRUD pelo SUPER_ADMIN)

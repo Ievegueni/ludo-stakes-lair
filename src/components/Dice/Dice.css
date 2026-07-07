@@ -53,8 +53,7 @@
 }
 .nanter-dice.theme-gold .nanter-dice-pip {
   fill: #ffd700;
-  filter:
-    drop-shadow(0 0 1.5px rgba(255, 215, 0, 0.85))
+  filter: drop-shadow(0 0 1.5px rgba(255, 215, 0, 0.85))
     drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.4));
 }
 
