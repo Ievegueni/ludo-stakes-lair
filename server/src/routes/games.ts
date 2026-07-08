@@ -245,7 +245,7 @@ app.post("/start/:roomId", async (c) => {
     return c.json({ game: gameRes.rows[0] });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
+    console.error(`[games.start] FAILED room=${roomId} user=${u.id}:`, err);
     return c.json({ error: "start failed" }, 500);
   } finally {
     client.release();
@@ -701,10 +701,14 @@ app.post("/:id/resign", async (c) => {
     state.players[resignerIdx].resigned = true;
 
     const active = state.players.filter((p) => !p.resigned);
+    const activeHumans = active.filter((p) => !p.isBot);
     let ns: GameState;
-    if (active.length === 1) {
-      // Último jogador activo vence por desistência dos restantes
-      ns = { ...state, winner: active[0].id, diceValue: null, phase: "finished" };
+    if (active.length === 1 || activeHumans.length === 0) {
+      // O jogo termina se sobra apenas um jogador OU se já não há humanos
+      // activos (só restam bots, que ninguém conduz). O vencedor é o
+      // primeiro jogador activo — se for bot, o settle envia o pot à casa.
+      // Sem esta 2ª condição, a sala ficava presa em 'playing' para sempre.
+      ns = { ...state, winner: active[0]?.id ?? null, diceValue: null, phase: "finished" };
     } else {
       // Se era a vez do desistente, avança
       const wasCurrent = state.currentPlayerIndex === resignerIdx;

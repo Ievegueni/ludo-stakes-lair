@@ -58,13 +58,20 @@ export function createInitialPieces(color: PlayerColor): Piece[] {
   }));
 }
 
-export function createPlayer(id: string, name: string, color: PlayerColor, isBot: boolean): Player {
+export function createPlayer(
+  id: string,
+  name: string,
+  color: PlayerColor,
+  isBot: boolean,
+  avatarUrl?: string,
+): Player {
   return {
     id,
     name,
     color,
     pieces: createInitialPieces(color),
     isBot,
+    avatarUrl,
   };
 }
 

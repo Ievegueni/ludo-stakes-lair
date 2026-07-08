@@ -34,6 +34,7 @@ interface GamePlayer {
   name: string;
   color: PlayerColor;
   isBot: boolean;
+  avatarUrl?: string;
 }
 
 interface MultiplayerInfo {
@@ -104,6 +105,7 @@ function Index() {
             name: p.name,
             color: p.color as PlayerColor,
             isBot: p.isBot,
+            avatarUrl: p.avatarUrl ?? undefined,
           }));
           const room = await api.rooms.get(game.room_id).catch(() => null);
           if (cancelled) return;
@@ -163,7 +165,9 @@ function Index() {
   }
 
   if (view === "game" && gamePlayers) {
-    const players = gamePlayers.map((p) => createPlayer(p.id, p.name, p.color, p.isBot));
+    const players = gamePlayers.map((p) =>
+      createPlayer(p.id, p.name, p.color, p.isBot, p.avatarUrl),
+    );
     return (
       <>
         <Toaster position="top-center" richColors />

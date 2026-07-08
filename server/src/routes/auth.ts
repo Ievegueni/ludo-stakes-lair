@@ -54,8 +54,8 @@ app.post("/signup", async (c) => {
   const phone = normalizePhone(body.phone || "");
   const password = body.password || "";
   if (phone.length < 7) return c.json({ error: "invalid phone" }, 400);
-  if (password.length < 8 || password.length > 64) {
-    return c.json({ error: "password must be 8-64 characters" }, 400);
+  if (!/^\d{6}$/.test(password)) {
+    return c.json({ error: "password must be exactly 6 digits" }, 400);
   }
   if (rateLimited(clientKey(c, phone))) {
     return c.json({ error: "too many attempts, try again later" }, 429);

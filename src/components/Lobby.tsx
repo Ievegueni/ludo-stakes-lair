@@ -131,7 +131,7 @@ const MIN_BET = 500;
 
 interface LobbyProps {
   onStartGame: (
-    players: { id: string; name: string; color: PlayerColor; isBot: boolean }[],
+    players: { id: string; name: string; color: PlayerColor; isBot: boolean; avatarUrl?: string }[],
     betAmount: number,
     multiplayer?: { gameId: string; isHost: boolean; initialState: any; version: number },
   ) => void;
@@ -344,6 +344,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
           name: p.name,
           color: p.color as PlayerColor,
           isBot: p.isBot,
+          avatarUrl: p.avatarUrl ?? undefined,
         }));
         onStartGame(players, room.bet_amount, {
           gameId: gameRecord.id,

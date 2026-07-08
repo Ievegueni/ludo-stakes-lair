@@ -10,6 +10,7 @@ const normalizePhone = (raw: string) => raw.replace(/\D/g, "");
 export function AuthPhone() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [loading, setLoading] = useState(false);
 
@@ -23,9 +24,8 @@ export function AuthPhone() {
       toast.error("Número de telemóvel inválido");
       return;
     }
-    // Só validamos o mínimo no registo — contas antigas podem ter senhas curtas
-    if (mode === "signup" && (password.length < 8 || password.length > 64)) {
-      toast.error("A senha deve ter entre 8 e 64 caracteres");
+    if (password.length !== 6) {
+      toast.error("A senha deve ter exactamente 6 dígitos");
       return;
     }
 
@@ -74,29 +74,33 @@ export function AuthPhone() {
         <div className="bg-card rounded-2xl border border-border p-6 space-y-4 shadow-xl">
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">Telemóvel</label>
-            <div className="relative">
-              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
+            <div className="flex rounded-md border border-input bg-background ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 overflow-hidden">
+              <span className="flex items-center gap-1.5 px-3 bg-muted/60 border-r border-input text-sm font-medium text-foreground select-none shrink-0">
+                <Phone className="w-4 h-4 text-muted-foreground" />
+                +244
+              </span>
+              <input
                 type="tel"
-                inputMode="tel"
+                inputMode="numeric"
                 placeholder="9XX XXX XXX"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="pl-9"
-                autoComplete="tel"
+                onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 9))}
+                className="flex-1 bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
+                autoComplete="tel-national"
               />
             </div>
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">
-              Senha <span className="text-xs text-muted-foreground">(mín. 8 caracteres)</span>
+              Senha <span className="text-xs text-muted-foreground">(6 dígitos)</span>
             </label>
             <Input
               type="password"
-              placeholder="••••••••"
+              inputMode="numeric"
+              placeholder="••••••"
               value={password}
-              maxLength={64}
-              onChange={(e) => setPassword(e.target.value.slice(0, 64))}
+              maxLength={6}
+              onChange={(e) => setPassword(e.target.value.replace(/\D/g, "").slice(0, 6))}
               autoComplete={mode === "login" ? "current-password" : "new-password"}
             />
           </div>
