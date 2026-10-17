@@ -28,6 +28,10 @@ export interface GameState {
   turnTimer: number;
   consecutiveSixes: number;
   phase: "waiting" | "rolling" | "moving" | "finished";
+  /** Multiplayer: epoch ms (relógio do servidor) em que o servidor age sozinho. */
+  turnDeadline?: number | null;
+  /** Multiplayer: humanos em auto-play — o servidor joga por eles. */
+  autoPlay?: string[];
 }
 
 // Starting positions for each color on the 52-cell main track

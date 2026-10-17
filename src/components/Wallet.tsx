@@ -58,6 +58,7 @@ export function Wallet() {
       case "withdraw":
         return <ArrowUpRight className="w-4 h-4 text-destructive" />;
       case "gift":
+      case "gift_received":
         return <Gift className="w-4 h-4 text-amber-500" />;
       default:
         return <History className="w-4 h-4 text-muted-foreground" />;
@@ -78,6 +79,8 @@ export function Wallet() {
         return "Reembolso";
       case "gift":
         return "Gift";
+      case "gift_received":
+        return "Gift recebido";
       default:
         return type;
     }
@@ -179,12 +182,12 @@ export function Wallet() {
                   </div>
                   <span
                     className={`text-sm font-extrabold ${
-                      ["deposit", "win", "refund"].includes(tx.type)
+                      ["deposit", "win", "refund", "gift_received"].includes(tx.type)
                         ? "text-emerald-400"
                         : "text-rose-400"
                     }`}
                   >
-                    {["deposit", "win", "refund"].includes(tx.type) ? "+" : "-"}
+                    {["deposit", "win", "refund", "gift_received"].includes(tx.type) ? "+" : "-"}
                     {tx.amount.toLocaleString()} Kz
                   </span>
                 </div>

@@ -34,6 +34,10 @@ export interface GameState {
   turnTimer: number;
   consecutiveSixes: number;
   phase: "waiting" | "rolling" | "moving" | "finished";
+  /** Epoch ms em que o servidor age sozinho (bot, auto-play ou timeout). */
+  turnDeadline?: number | null;
+  /** Humanos em auto-play — o servidor joga por eles. */
+  autoPlay?: string[];
 }
 
 export const START_POSITIONS: Record<PlayerColor, number> = {
@@ -159,4 +163,133 @@ export function nextActiveIdx(players: Player[], fromIdx: number): number {
     if (!players[idx].resigned) return idx;
   }
   return fromIdx;
+}
+
+// Bot AI — cópia de src/lib/ludo-engine.ts (o servidor joga pelos bots e auto-play).
+// Avalia cada peca movivel com um sistema de pontuacao para criar um bot
+// que parece humano — varia entre agressivo, defensivo e oportunista.
+
+function scorePieceMove(
+  player: Player,
+  pieceId: number,
+  diceValue: number,
+  state: GameState,
+  playerIndex: number,
+): number {
+  const piece = player.pieces[pieceId];
+  if (!piece) return -Infinity;
+
+  let score = 0;
+
+  // --- Sair de casa (6) ---
+  if (piece.position === -1) {
+    const piecesOut = player.pieces.filter((p) => p.position >= 0 && !p.isFinished).length;
+    // Mais valioso sair quando temos poucas pecas fora
+    score += piecesOut === 0 ? 60 : piecesOut === 1 ? 40 : 20;
+    return score;
+  }
+
+  // Simular o movimento para analise
+  const simState = JSON.parse(JSON.stringify(state)) as GameState;
+  const { newState, captured } = movePiece(simState, playerIndex, pieceId, diceValue);
+
+  // --- Capturar adversario (prioridade maxima) ---
+  if (captured) {
+    score += 80;
+  }
+
+  // --- Terminar peca (chegar ao fim) ---
+  const simPiece = newState.players[playerIndex].pieces[pieceId];
+  if (simPiece.isFinished) {
+    score += 90;
+  }
+
+  // --- Entrar na home stretch (seguro) ---
+  if (piece.position < 52 && simPiece.position >= 52) {
+    score += 50;
+  }
+
+  // --- Ir para posicao segura ---
+  if (piece.position >= 0 && piece.position <= 51) {
+    const newAbsPos =
+      simPiece.position <= 51 ? (simPiece.position + START_POSITIONS[piece.color]) % 52 : -1;
+    if (newAbsPos >= 0 && SAFE_POSITIONS.includes(newAbsPos)) {
+      score += 25;
+    }
+  }
+
+  // --- Fugir de perigo (peca em risco de ser capturada) ---
+  if (piece.position >= 0 && piece.position <= 51) {
+    const absPos = getAbsolutePosition(piece);
+    if (!SAFE_POSITIONS.includes(absPos)) {
+      let inDanger = false;
+      for (const other of state.players) {
+        if (other.color === player.color) continue;
+        for (const op of other.pieces) {
+          if (op.position < 0 || op.position > 51 || op.isFinished) continue;
+          const otherAbs = getAbsolutePosition(op);
+          const dist = (absPos - otherAbs + 52) % 52;
+          if (dist >= 1 && dist <= 6) {
+            inDanger = true;
+            break;
+          }
+        }
+        if (inDanger) break;
+      }
+      if (inDanger) {
+        score += 35; // Fugir de perigo e valioso
+      }
+    }
+  }
+
+  // --- Progresso geral (preferir pecas mais avancadas) ---
+  if (piece.position >= 0) {
+    score += piece.position * 0.3;
+  }
+
+  // --- Evitar posicoes perigosas apos mover ---
+  if (simPiece.position >= 0 && simPiece.position <= 51) {
+    const newAbs = (simPiece.position + START_POSITIONS[piece.color]) % 52;
+    if (!SAFE_POSITIONS.includes(newAbs)) {
+      for (const other of state.players) {
+        if (other.color === player.color) continue;
+        for (const op of other.pieces) {
+          if (op.position < 0 || op.position > 51 || op.isFinished) continue;
+          const otherAbs = getAbsolutePosition(op);
+          const dist = (newAbs - otherAbs + 52) % 52;
+          if (dist >= 1 && dist <= 6) {
+            score -= 15; // Penalizar mover para posicao perigosa
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return score;
+}
+
+export function botChoosePiece(player: Player, diceValue: number, state: GameState): number {
+  const movable = getMovablePieces(player, diceValue);
+  if (movable.length === 0) return -1;
+  if (movable.length === 1) return movable[0];
+
+  const playerIndex = state.players.indexOf(player);
+
+  // Pontuar cada peca
+  const scored = movable.map((id) => ({
+    id,
+    score: scorePieceMove(player, id, diceValue, state, playerIndex),
+  }));
+
+  // Ordenar por pontuacao (maior primeiro)
+  scored.sort((a, b) => b.score - a.score);
+
+  // Adicionar variacao humana: 15% de chance de escolher a 2a melhor opcao
+  // para o bot nao parecer perfeito
+  if (scored.length >= 2 && Math.random() < 0.15) {
+    return scored[1].id;
+  }
+
+  return scored[0].id;
 }

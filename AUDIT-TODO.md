@@ -47,7 +47,7 @@
   - Problema: Vulneravel a XSS
   - Fix: Considerar httpOnly cookies
 
-- [ ] **V8 - Sem invalidacao de tokens no logout**
+- [x] **V8 - Sem invalidacao de tokens no logout** ✅ 2026-10-16 — `users.token_version` + POST /api/auth/logout (invalida todos os dispositivos)
   - Ficheiro: `src/lib/api.ts:129-131`
   - Problema: Token valido 30 dias apos logout
   - Fix: Blacklist de tokens ou reduzir TTL
@@ -204,3 +204,23 @@
 19. V7 - Token localStorage
 20. V8 - Token invalidation
 21. V9 - Rate limiting reports
+
+---
+
+## REVISÃO 2026-10-16 (todos corrigidos e testados E2E)
+
+- [x] Carteira aceitava `deposit/win/refund` do cliente → só depósito simulado, e só em dev ou com `ALLOW_FAKE_DEPOSITS=true`; contas novas começam com 0
+- [x] Gifts não creditavam o destinatário e o chat aceitava gifts grátis → `POST /api/games/:id/gift` com catálogo e preços no servidor; nome/cor do chat vêm do estado
+- [x] `PATCH /api/games/:id` deixava escolher o dado e saltar vezes → removido
+- [x] Bot driver jogava pelos humanos → só o próprio jogador age; bots/auto-play/timeouts são do servidor (`workers/game-ticker.ts`)
+- [x] Timeout só no browser (jogo congelava) → `state.turnDeadline` aplicado pelo servidor
+- [x] `house_ledger` apagado em cascata pelo cleanup → FK removida
+- [x] `PATCH /api/rooms/:id` (status) explorável → removido
+- [x] Avatar em `games.state` rebentava o `pg_notify` (8000 bytes) → fora do estado + fallback `truncated` no trigger
+- [x] Realtime enviava tudo a todos → filtrado por utilizador; código de sala privada só para o host
+- [x] Rate limit contornável via X-Forwarded-For → limite por telefone (5) + por IP real (30); `TRUST_PROXY` para proxies
+- [x] Host a sair deixava a sala presa → host transferido
+- [x] Dependências: 26 vulns → 1 low
+- [x] Leitura de jogo/chat/sala privada sem verificação de membro; bots em salas a jogar; aposta sem mínimo/máximo; merge raso da config do smart dice; `Math.random` no dado; Docker como root
+- [ ] V7 (token no localStorage) — ver nota na conversa
+- [ ] B9 — 62 `any` restantes

@@ -229,11 +229,7 @@ export function GameChat({
       setInput("");
       setShowEmojis(false);
       try {
-        await api.chat.send(gameId, {
-          author_name: me.name,
-          color: me.color,
-          text: trimmed,
-        });
+        await api.chat.send(gameId, trimmed);
       } catch (err: any) {
         toast.error(err?.message || "Erro ao enviar");
       }
@@ -283,7 +279,7 @@ export function GameChat({
   };
 
   const sendGift = async () => {
-    if (!selectedGift || !selectedRecipient || !me || sendingGift) return;
+    if (!selectedGift || !selectedRecipient || !me || sendingGift || !gameId) return;
     if (balance < selectedGift.price) {
       toast.error("Saldo insuficiente!");
       return;
@@ -293,52 +289,8 @@ export function GameChat({
 
     setSendingGift(true);
     try {
-      const r = await api.wallet.createTransaction({
-        type: "gift",
-        amount: selectedGift.price,
-        description: `Gift ${selectedGift.emoji} ${selectedGift.name} → ${recipient.name}`,
-      });
+      const r = await api.chat.gift(gameId, selectedGift.id, recipient.id);
       onBalanceChange(r.balance);
-
-      if (isSync && gameId) {
-        try {
-          await api.chat.send(gameId, {
-            author_name: me.name,
-            color: me.color,
-            gift: {
-              emoji: selectedGift.emoji,
-              name: selectedGift.name,
-              price: selectedGift.price,
-              toName: recipient.name,
-              toColor: recipient.color,
-            },
-          });
-        } catch (err) {
-          // O débito já foi feito na wallet — a mensagem de chat é só visual,
-          // mas o utilizador deve saber que os outros podem não ter visto o gift.
-          console.error("gift chat message failed", err);
-          toast.warning("Gift enviado, mas a mensagem pode não ter chegado aos outros jogadores");
-        }
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `${Date.now()}-${Math.random()}`,
-            authorId: me.id,
-            authorName: me.name,
-            color: me.color,
-            text: "",
-            timestamp: Date.now(),
-            gift: {
-              emoji: selectedGift.emoji,
-              name: selectedGift.name,
-              price: selectedGift.price,
-              toName: recipient.name,
-              toColor: recipient.color,
-            },
-          },
-        ]);
-      }
 
       setFloatingGift({ emoji: selectedGift.emoji, key: Date.now() });
       setTimeout(() => setFloatingGift(null), 2500);
@@ -354,7 +306,8 @@ export function GameChat({
     }
   };
 
-  const others = players.filter((p) => p.id !== currentUserId);
+  // Gifts só para humanos num jogo sincronizado — o servidor credita o destinatário.
+  const others = isSync ? players.filter((p) => p.id !== currentUserId && !p.isBot) : [];
 
   return (
     <div className="w-full bg-card border border-border rounded-xl shadow-lg flex flex-col overflow-hidden">
@@ -441,18 +394,20 @@ export function GameChat({
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="flex items-center gap-1 p-2 border-t border-border">
-        <button
-          type="button"
-          onClick={() => {
-            setShowGifts(true);
-            setSelectedGift(null);
-            setSelectedRecipient(others.length === 1 ? others[0].id : null);
-          }}
-          className="p-2 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
-          aria-label="Enviar gift"
-        >
-          <Gift className="w-5 h-5" />
-        </button>
+        {others.length > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              setShowGifts(true);
+              setSelectedGift(null);
+              setSelectedRecipient(others.length === 1 ? others[0].id : null);
+            }}
+            className="p-2 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+            aria-label="Enviar gift"
+          >
+            <Gift className="w-5 h-5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowEmojis((s) => !s)}

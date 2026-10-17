@@ -133,6 +133,7 @@ export function Profile() {
       case "withdraw":
         return <ArrowUpRight className="w-4 h-4 text-destructive" />;
       case "gift":
+      case "gift_received":
         return <Gift className="w-4 h-4 text-amber-500" />;
       default:
         return <History className="w-4 h-4 text-muted-foreground" />;
@@ -153,12 +154,14 @@ export function Profile() {
         return "Reembolso";
       case "gift":
         return "Gift enviado";
+      case "gift_received":
+        return "Gift recebido";
       default:
         return type;
     }
   };
 
-  const isCredit = (type: string) => ["deposit", "win", "refund"].includes(type);
+  const isCredit = (type: string) => ["deposit", "win", "refund", "gift_received"].includes(type);
 
   const glass: React.CSSProperties = {
     background: "rgba(255,255,255,0.05)",

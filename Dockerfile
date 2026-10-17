@@ -27,6 +27,12 @@ COPY server ./server
 COPY public ./public
 
 EXPOSE 3000
-ENV NODE_ENV=production
+ENV NODE_ENV=production PORT=3000
+
+# Não correr como root dentro do contentor
+USER node
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/health || exit 1
 
 CMD ["node", "--import", "tsx", "server/src/index.ts"]

@@ -3,44 +3,29 @@ import type { PoolClient } from "pg";
 import { one, query, pool } from "../db.js";
 import { requireAuth } from "../auth.js";
 import { chargeBet, InsufficientBalanceError } from "../lib/wallet.js";
+import { type GameState, type PlayerColor } from "../game/engine.js";
 import {
-  type GameState,
-  type Player as GamePlayer,
-  getMovablePieces,
-  canMovePiece,
-  movePiece,
-  nextActiveIdx,
-} from "../game/engine.js";
-import { smartRollDice, loadSmartDiceConfig } from "../game/smart-dice.js";
+  movePieceFor,
+  passTurn,
+  rollDiceFor,
+  saveState,
+  settleGame,
+  withDeadline,
+} from "../game/actions.js";
 
 const app = new Hono();
 
 app.use("*", requireAuth);
 
-/**
- * Determina o "bot driver" — o cliente humano responsável por avançar a
- * vez de bots e timeouts. Algoritmo determinístico: primeiro humano
- * não-bot e não-resigned na ordem do array. Todos os clientes calculam
- * a mesma resposta a partir do mesmo `state`.
- *
- * Se o host original sai/desiste, o seguinte humano herda automaticamente
- * o papel de bot driver — sem necessidade de reeleição.
- */
-function getBotDriverId(state: GameState): string | null {
-  const humans = state.players.filter((p: any) => !p.isBot && !p.resigned && !!p.id);
-  return humans.length > 0 ? humans[0].id : null;
-}
-
 function buildInitialState(
   players: Array<{
     id: string;
     name: string;
-    color: string;
+    color: PlayerColor;
     isBot: boolean;
-    avatarUrl?: string | null;
   }>,
 ): GameState {
-  return {
+  return withDeadline({
     players: players.map((p) => ({
       ...p,
       pieces: Array.from({ length: 4 }, (_, i) => ({
@@ -57,76 +42,25 @@ function buildInitialState(
     turnTimer: 15,
     consecutiveSixes: 0,
     phase: "rolling",
-  } as GameState;
+    autoPlay: [],
+  });
 }
 
 /**
- * Liquida um jogo terminado: credita o prémio (pot × 0.95) ao vencedor
- * humano e marca o jogo/sala como finalizados. Idempotente via flag
- * `settled` (o caller deve garantir FOR UPDATE na linha do jogo).
+ * Só o próprio jogador age na sua vez. Bots, auto-play e timeouts são
+ * conduzidos pelo servidor (workers/game-ticker.ts) — nenhum cliente joga
+ * por outro.
  */
-async function settleGame(
-  client: PoolClient,
-  gameId: string,
-  roomId: string,
-  state: GameState,
-): Promise<void> {
-  const roomRes = await client.query<{ bet_amount: string }>(
-    "SELECT bet_amount FROM rooms WHERE id = $1",
-    [roomId],
-  );
-  const betAmount = Number(roomRes.rows[0]?.bet_amount ?? 0);
-  const paidRes = await client.query<{ user_id: string }>(
-    "SELECT user_id FROM room_players WHERE room_id = $1 AND bet_paid = true AND user_id IS NOT NULL",
-    [roomId],
-  );
-  const paidUserIds = paidRes.rows.map((r) => r.user_id);
-  const pot = betAmount * paidUserIds.length;
-  const prize = Math.floor(pot * 0.95);
-
-  const winnerId = state.winner!;
-  const winnerPlayer = state.players.find((p) => p.id === winnerId);
-  const winnerIsBot = !!winnerPlayer?.isBot;
-
-  if (!winnerIsBot && paidUserIds.includes(winnerId) && prize > 0) {
-    await client.query(
-      "UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2",
-      [prize, winnerId],
-    );
-    await client.query(
-      "INSERT INTO transactions (user_id, type, amount, description) VALUES ($1, $2, $3, $4)",
-      [winnerId, "win", prize, `Vitória — prémio de ${prize.toLocaleString()} Kz`],
-    );
-  }
-
-  await client.query(
-    `UPDATE games SET settled = true, settled_at = now(), winner_user_id = $1, prize = $2 WHERE id = $3`,
-    [winnerIsBot ? null : winnerId, prize, gameId],
-  );
-  await client.query("UPDATE rooms SET status = 'finished' WHERE id = $1", [roomId]);
-
-  // Ledger da casa: pot/prémio/rake por jogo — base do cálculo de RTP real.
-  // Se o vencedor é bot, o pot inteiro é rake (a casa fica com tudo).
-  const paidOut = !winnerIsBot && paidUserIds.includes(winnerId) ? prize : 0;
-  await client.query(
-    `INSERT INTO house_ledger (game_id, room_id, pot, prize, rake, winner_user_id, winner_is_bot)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (game_id) DO NOTHING`,
-    [gameId, roomId, pot, paidOut, pot - paidOut, winnerIsBot ? null : winnerId, winnerIsBot],
-  );
+function isMyTurn(state: GameState, userId: string): boolean {
+  const cur = state.players[state.currentPlayerIndex];
+  return !!cur && !cur.isBot && !cur.resigned && cur.id === userId;
 }
 
-/**
- * Autoriza uma acção de jogo: o jogador da vez joga por si próprio;
- * o bot driver (primeiro humano activo) joga pelas vezes de bots e
- * pelos humanos em auto-play/timeout — paridade com o modelo anterior,
- * mas agora o RESULTADO (dado/movimento) é sempre calculado no servidor.
- */
-function canAct(state: GameState, userId: string): boolean {
-  const currentPlayer = state.players[state.currentPlayerIndex];
-  if (!currentPlayer) return false;
-  if (currentPlayer.id === userId) return true;
-  return getBotDriverId(state) === userId;
+/** O jogador voltou a agir — sai do auto-play. */
+function clearAutoPlay(state: GameState, userId: string): GameState {
+  return state.autoPlay?.includes(userId)
+    ? { ...state, autoPlay: state.autoPlay.filter((id) => id !== userId) }
+    : state;
 }
 
 // Start a game for a room (host only). Atomically: create game + set room status.
@@ -206,23 +140,20 @@ app.post("/start/:roomId", async (c) => {
       }
     }
 
-    // Resolve human profile names + avatar URLs
+    // Nomes dos humanos. O avatar NÃO entra no estado: é um data URL de
+    // dezenas de KB e o pg_notify do realtime rejeita payloads >= 8000 bytes
+    // (o /start falhava). O cliente busca avatares via /api/profiles.
     const humanIds = playersRes.rows
       .filter((p: any) => !p.is_bot && p.user_id)
       .map((p: any) => p.user_id);
     const nameMap: Record<string, string> = {};
-    const avatarMap: Record<string, string | null> = {};
     if (humanIds.length > 0) {
-      const profRes = await client.query<{
-        id: string;
-        display_name: string;
-        avatar_url: string | null;
-      }>("SELECT id, display_name, avatar_url FROM profiles WHERE id = ANY($1::uuid[])", [
-        humanIds,
-      ]);
+      const profRes = await client.query<{ id: string; display_name: string }>(
+        "SELECT id, display_name FROM profiles WHERE id = ANY($1::uuid[])",
+        [humanIds],
+      );
       profRes.rows.forEach((p) => {
         nameMap[p.id] = p.display_name;
-        avatarMap[p.id] = p.avatar_url;
       });
     }
 
@@ -231,7 +162,6 @@ app.post("/start/:roomId", async (c) => {
       name: p.is_bot ? p.bot_name || "Bot" : nameMap[p.user_id] || "Jogador",
       color: p.color,
       isBot: p.is_bot,
-      avatarUrl: p.is_bot ? null : avatarMap[p.user_id] || null,
     }));
 
     const initialState = buildInitialState(gamePlayers);
@@ -281,15 +211,19 @@ app.get("/active", async (c) => {
   return c.json({ game });
 });
 
+// Só jogadores do jogo o podem ler (o estado e o chat não são públicos)
+const isPlayer = (game: { state: GameState } | null, userId: string) =>
+  !!game?.state.players.some((p) => p.id === userId);
+
 app.get("/by-room/:roomId", async (c) => {
   const game = await one<any>("SELECT * FROM games WHERE room_id = $1", [c.req.param("roomId")]);
-  if (!game) return c.json({ error: "no game" }, 404);
+  if (!isPlayer(game, c.get("user").id)) return c.json({ error: "no game" }, 404);
   return c.json({ game });
 });
 
 app.get("/:id", async (c) => {
   const game = await one<any>("SELECT * FROM games WHERE id = $1", [c.req.param("id")]);
-  if (!game) return c.json({ error: "not found" }, 404);
+  if (!isPlayer(game, c.get("user").id)) return c.json({ error: "not found" }, 404);
   return c.json({ game });
 });
 
@@ -328,38 +262,15 @@ app.post("/:id/roll", async (c) => {
       await client.query("ROLLBACK");
       return c.json({ error: "not rolling phase", currentVersion: game.version }, 409);
     }
-    if (!canAct(state, u.id)) {
+    if (!isMyTurn(state, u.id)) {
       await client.query("ROLLBACK");
       return c.json({ error: "not your turn" }, 403);
     }
 
-    const idx = state.currentPlayerIndex;
-    const config = await loadSmartDiceConfig();
-    const dice = smartRollDice(id, state, idx, config);
-    const movable = getMovablePieces(state.players[idx], dice);
-
-    let ns: GameState;
-    if (movable.length === 0) {
-      // Sem jogadas possíveis — mostra o dado e passa a vez
-      const next = nextActiveIdx(state.players, idx);
-      ns = {
-        ...state,
-        diceValue: dice,
-        phase: "rolling",
-        currentPlayerIndex: next,
-        turnTimer: 15,
-        consecutiveSixes: 0,
-      };
-    } else {
-      ns = { ...state, diceValue: dice, phase: "moving", turnTimer: 30 };
-    }
-
-    const updated = await client.query<any>(
-      `UPDATE games SET state = $1::jsonb, version = version + 1, updated_at = now() WHERE id = $2 RETURNING *`,
-      [JSON.stringify(ns), id],
-    );
+    const { ns, dice, movable } = await rollDiceFor(id, clearAutoPlay(state, u.id));
+    const updated = await saveState(client, id, ns);
     await client.query("COMMIT");
-    return c.json({ game: updated.rows[0], dice, movable });
+    return c.json({ game: updated, dice, movable });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("[roll]", err);
@@ -403,72 +314,22 @@ app.post("/:id/move", async (c) => {
       await client.query("ROLLBACK");
       return c.json({ error: "not moving phase", currentVersion: game.version }, 409);
     }
-    if (!canAct(state, u.id)) {
+    if (!isMyTurn(state, u.id)) {
       await client.query("ROLLBACK");
       return c.json({ error: "not your turn" }, 403);
     }
 
-    const idx = state.currentPlayerIndex;
-    const player = state.players[idx];
-    const dice = state.diceValue;
-    const piece = player.pieces[pieceId!];
-    if (!piece || !canMovePiece(piece, dice, player.color)) {
+    const result = movePieceFor(clearAutoPlay(state, u.id), pieceId!);
+    if (!result) {
       await client.query("ROLLBACK");
       return c.json({ error: "illegal move" }, 400);
     }
-
-    const { newState, captured } = movePiece(state, idx, pieceId!, dice);
-
-    let ns: GameState;
-    if (newState.winner) {
-      ns = { ...newState, diceValue: null, phase: "finished" };
-    } else {
-      const gotSix = dice === 6;
-      const newConsecutiveSixes = gotSix ? newState.consecutiveSixes + 1 : 0;
-      if (newConsecutiveSixes >= 3) {
-        // 3 seises seguidos — perde a vez
-        const next = nextActiveIdx(newState.players, idx);
-        ns = {
-          ...newState,
-          currentPlayerIndex: next,
-          diceValue: null,
-          phase: "rolling",
-          turnTimer: 15,
-          consecutiveSixes: 0,
-        };
-      } else if (gotSix || captured) {
-        // Repete a vez
-        ns = {
-          ...newState,
-          diceValue: null,
-          phase: "rolling",
-          turnTimer: 15,
-          consecutiveSixes: newConsecutiveSixes,
-        };
-      } else {
-        const next = nextActiveIdx(newState.players, idx);
-        ns = {
-          ...newState,
-          currentPlayerIndex: next,
-          diceValue: null,
-          phase: "rolling",
-          turnTimer: 15,
-          consecutiveSixes: 0,
-        };
-      }
-    }
-
-    const updated = await client.query<any>(
-      `UPDATE games SET state = $1::jsonb, version = version + 1, updated_at = now() WHERE id = $2 RETURNING *`,
-      [JSON.stringify(ns), id],
-    );
-
-    if (ns.winner && !game.settled) {
-      await settleGame(client, id, game.room_id, ns);
-    }
+    const { ns, captured, dice } = result;
+    const updated = await saveState(client, id, ns);
+    if (ns.winner) await settleGame(client, id, game.room_id, ns);
 
     await client.query("COMMIT");
-    return c.json({ game: updated.rows[0], captured, dice });
+    return c.json({ game: updated, captured, dice });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("[move]", err);
@@ -478,94 +339,38 @@ app.post("/:id/move", async (c) => {
   }
 });
 
-// Apply a state update (RESTRITO). Depois da migração para acções
-// autoritárias (/roll e /move), este endpoint só serve para transições
-// "administrativas" do bot driver: avançar a vez em timeout e flags de
-// auto-play. QUALQUER alteração a peças, vencedor ou jogadores é rejeitada.
-app.patch("/:id", async (c) => {
+// Ligar/desligar o auto-play do PRÓPRIO jogador. Substitui o antigo PATCH
+// de estado (que permitia escolher o dado e saltar vezes).
+app.post("/:id/autoplay", async (c) => {
   const u = c.get("user");
   const id = c.req.param("id");
-  const body = await c.req.json<{ state: GameState; baseVersion: number }>();
-  if (!body.state || typeof body.baseVersion !== "number") {
-    return c.json({ error: "bad input" }, 400);
-  }
+  const body = await c.req.json<{ enabled?: boolean }>();
+  const enabled = body.enabled === true;
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const cur = await client.query<{
-      host_id: string;
-      state: GameState;
-      version: number;
-      room_id: string;
-      settled: boolean;
-    }>("SELECT host_id, state, version, room_id, settled FROM games WHERE id = $1 FOR UPDATE", [
-      id,
-    ]);
-    const game = cur.rows[0];
-    if (!game) {
-      await client.query("ROLLBACK");
-      return c.json({ error: "not found" }, 404);
-    }
-    if (game.version !== body.baseVersion) {
-      await client.query("ROLLBACK");
-      return c.json({ error: "version conflict", currentVersion: game.version }, 409);
-    }
-
-    const cur_state = game.state;
-    const currentPlayer = cur_state.players[cur_state.currentPlayerIndex];
-    const driverId = getBotDriverId(cur_state);
-    const isDriver = driverId === u.id;
-    const isCurrentPlayer = currentPlayer && currentPlayer.id === u.id;
-
-    if (!isCurrentPlayer && !isDriver) {
-      await client.query("ROLLBACK");
-      return c.json({ error: "not your turn" }, 403);
-    }
-
-    // Validações de integridade: o PATCH nunca pode alterar o jogo em si.
-    const sameWinner = (body.state.winner ?? null) === (cur_state.winner ?? null);
-    const samePlayers =
-      JSON.stringify(
-        cur_state.players.map((p) => ({
-          id: p.id,
-          color: p.color,
-          isBot: p.isBot,
-          resigned: !!p.resigned,
-          pieces: p.pieces,
-        })),
-      ) ===
-      JSON.stringify(
-        (body.state.players || []).map((p) => ({
-          id: p.id,
-          color: p.color,
-          isBot: p.isBot,
-          resigned: !!p.resigned,
-          pieces: p.pieces,
-        })),
-      );
-    const validPhase = body.state.phase === "rolling" || body.state.phase === "moving";
-    const validIndex =
-      Number.isInteger(body.state.currentPlayerIndex) &&
-      body.state.currentPlayerIndex >= 0 &&
-      body.state.currentPlayerIndex < cur_state.players.length;
-
-    if (!sameWinner || !samePlayers || !validPhase || !validIndex) {
-      await client.query("ROLLBACK");
-      return c.json({ error: "forbidden state change" }, 403);
-    }
-
-    const updated = await client.query<any>(
-      `UPDATE games SET state = $1::jsonb, version = version + 1, updated_at = now() WHERE id = $2 RETURNING *`,
-      [JSON.stringify(body.state), id],
+    const cur = await client.query<{ state: GameState; settled: boolean }>(
+      "SELECT state, settled FROM games WHERE id = $1 FOR UPDATE",
+      [id],
     );
-
+    const game = cur.rows[0];
+    const me = game?.state.players.find((p) => p.id === u.id && !p.isBot && !p.resigned);
+    if (!game || game.settled || !me) {
+      await client.query("ROLLBACK");
+      return c.json({ error: "not in this game" }, 400);
+    }
+    const others = (game.state.autoPlay ?? []).filter((x) => x !== u.id);
+    let ns: GameState = { ...game.state, autoPlay: enabled ? [...others, u.id] : others };
+    // Se é a vez dele, o prazo muda (auto joga já; manual recebe tempo novo)
+    if (game.state.players[game.state.currentPlayerIndex]?.id === u.id) ns = withDeadline(ns);
+    const updated = await saveState(client, id, ns);
     await client.query("COMMIT");
-    return c.json({ game: updated.rows[0] });
+    return c.json({ game: updated });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
-    return c.json({ error: "update failed" }, 500);
+    console.error("[autoplay]", err);
+    return c.json({ error: "autoplay failed" }, 500);
   } finally {
     client.release();
   }
@@ -573,6 +378,10 @@ app.patch("/:id", async (c) => {
 
 // --- Chat ---
 app.get("/:id/chat", async (c) => {
+  const game = await one<{ state: GameState }>("SELECT state FROM games WHERE id = $1", [
+    c.req.param("id"),
+  ]);
+  if (!isPlayer(game, c.get("user").id)) return c.json({ error: "not found" }, 404);
   const rows = await query<any>(
     `SELECT id, user_id, author_name, color, text, gift_emoji, gift_name, gift_price,
             gift_to_name, gift_to_color, created_at
@@ -587,58 +396,108 @@ app.get("/:id/chat", async (c) => {
   });
 });
 
+// Nome/cor do autor vêm SEMPRE do estado do jogo — nunca do body.
 app.post("/:id/chat", async (c) => {
   const u = c.get("user");
   const id = c.req.param("id");
-  const body = await c.req.json<{
-    text?: string;
-    color: string;
-    author_name: string;
-    gift?: {
-      emoji: string;
-      name: string;
-      price: number;
-      toName: string;
-      toColor: string;
-    };
-  }>();
+  const body = await c.req.json<{ text?: string }>();
+  const text = (body.text ?? "").trim();
+  if (!text) return c.json({ error: "empty message" }, 400);
+  if (text.length > 500) return c.json({ error: "message too long" }, 400);
 
-  // Verify the user is part of the game
-  const game = await one<{ state: any }>("SELECT state FROM games WHERE id = $1", [id]);
+  const game = await one<{ state: GameState }>("SELECT state FROM games WHERE id = $1", [id]);
   if (!game) return c.json({ error: "game not found" }, 404);
-  const inGame = game.state.players.some((p: any) => p.id === u.id);
-  if (!inGame) return c.json({ error: "not in this game" }, 403);
-
-  if (!body.gift && !body.text?.trim()) {
-    return c.json({ error: "empty message" }, 400);
-  }
+  const me = game.state.players.find((p) => p.id === u.id);
+  if (!me) return c.json({ error: "not in this game" }, 403);
 
   const inserted = await one<any>(
-    `INSERT INTO chat_messages
-       (game_id, user_id, author_name, color, text,
-        gift_emoji, gift_name, gift_price, gift_to_name, gift_to_color)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO chat_messages (game_id, user_id, author_name, color, text)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING id, user_id, author_name, color, text,
                gift_emoji, gift_name, gift_price, gift_to_name, gift_to_color, created_at`,
-    [
-      id,
-      u.id,
-      body.author_name,
-      body.color,
-      body.text ?? null,
-      body.gift?.emoji ?? null,
-      body.gift?.name ?? null,
-      body.gift?.price ?? null,
-      body.gift?.toName ?? null,
-      body.gift?.toColor ?? null,
-    ],
+    [id, u.id, me.name, me.color, text],
   );
-  return c.json({
-    message: {
-      ...inserted,
-      gift_price: inserted?.gift_price === null ? null : Number(inserted?.gift_price),
-    },
-  });
+  return c.json({ message: { ...inserted, gift_price: null } });
+});
+
+// Catálogo de gifts — fonte de verdade dos preços (o cliente só envia o id).
+const GIFTS: Record<string, { emoji: string; name: string; price: number }> = {
+  rose: { emoji: "🌹", name: "Rosa", price: 50 },
+  choco: { emoji: "🍫", name: "Chocolate", price: 100 },
+  beer: { emoji: "🍻", name: "Cerveja", price: 200 },
+  cake: { emoji: "🎂", name: "Bolo", price: 500 },
+  fire: { emoji: "🔥", name: "Em Chamas", price: 750 },
+  diamond: { emoji: "💎", name: "Diamante", price: 1000 },
+  car: { emoji: "🚗", name: "Carro", price: 2000 },
+  rocket: { emoji: "🚀", name: "Foguete", price: 5000 },
+  crown: { emoji: "👑", name: "Coroa", price: 10000 },
+};
+
+// Enviar gift: debita quem envia, credita o destinatário (humano no mesmo
+// jogo) e publica a mensagem no chat — tudo numa transacção.
+app.post("/:id/gift", async (c) => {
+  const u = c.get("user");
+  const id = c.req.param("id");
+  const body = await c.req.json<{ giftId?: string; toPlayerId?: string }>();
+  const gift = GIFTS[body.giftId ?? ""];
+  if (!gift) return c.json({ error: "bad gift" }, 400);
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const g = await client.query<{ state: GameState }>("SELECT state FROM games WHERE id = $1", [
+      id,
+    ]);
+    const state = g.rows[0]?.state;
+    const me = state?.players.find((p) => p.id === u.id);
+    const to = state?.players.find((p) => p.id === body.toPlayerId);
+    if (!state || !me) {
+      await client.query("ROLLBACK");
+      return c.json({ error: "not in this game" }, 403);
+    }
+    if (!to || to.isBot || to.id === u.id) {
+      await client.query("ROLLBACK");
+      return c.json({ error: "bad recipient" }, 400);
+    }
+
+    const debit = await client.query<{ balance: string }>(
+      "UPDATE wallets SET balance = balance - $1, updated_at = now() WHERE user_id = $2 AND balance >= $1 RETURNING balance",
+      [gift.price, u.id],
+    );
+    if (!debit.rows[0]) {
+      await client.query("ROLLBACK");
+      return c.json({ error: "insufficient balance" }, 400);
+    }
+    await client.query(
+      "UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2",
+      [gift.price, to.id],
+    );
+    await client.query(
+      `INSERT INTO transactions (user_id, type, amount, description)
+       VALUES ($1, 'gift', $3, $4), ($2, 'gift_received', $3, $5)`,
+      [
+        u.id,
+        to.id,
+        gift.price,
+        `Gift ${gift.emoji} ${gift.name} → ${to.name}`,
+        `Gift ${gift.emoji} ${gift.name} de ${me.name}`,
+      ],
+    );
+    await client.query(
+      `INSERT INTO chat_messages
+         (game_id, user_id, author_name, color, gift_emoji, gift_name, gift_price, gift_to_name, gift_to_color)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [id, u.id, me.name, me.color, gift.emoji, gift.name, gift.price, to.name, to.color],
+    );
+    await client.query("COMMIT");
+    return c.json({ balance: Number(debit.rows[0].balance) });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("[gift]", err);
+    return c.json({ error: "gift failed" }, 500);
+  } finally {
+    client.release();
+  }
 });
 
 // --- Resign ---
@@ -708,28 +567,22 @@ app.post("/:id/resign", async (c) => {
       // activos (só restam bots, que ninguém conduz). O vencedor é o
       // primeiro jogador activo — se for bot, o settle envia o pot à casa.
       // Sem esta 2ª condição, a sala ficava presa em 'playing' para sempre.
-      ns = { ...state, winner: active[0]?.id ?? null, diceValue: null, phase: "finished" };
+      ns = {
+        ...state,
+        winner: active[0]?.id ?? null,
+        diceValue: null,
+        phase: "finished",
+        turnDeadline: null,
+      };
     } else {
       // Se era a vez do desistente, avança
       const wasCurrent = state.currentPlayerIndex === resignerIdx;
-      ns = wasCurrent
-        ? {
-            ...state,
-            currentPlayerIndex: nextActiveIdx(state.players, resignerIdx),
-            diceValue: null,
-            phase: "rolling",
-            turnTimer: 15,
-            consecutiveSixes: 0,
-          }
-        : state;
+      ns = wasCurrent ? passTurn(state) : state;
     }
 
-    await client.query(
-      `UPDATE games SET state = $1::jsonb, version = version + 1, updated_at = now() WHERE id = $2`,
-      [JSON.stringify(ns), id],
-    );
+    await saveState(client, id, ns);
 
-    if (ns.winner && !game.settled) {
+    if (ns.winner) {
       await settleGame(client, id, game.room_id, ns);
     }
 

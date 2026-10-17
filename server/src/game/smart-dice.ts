@@ -9,6 +9,7 @@
  * inspeccionar nem manipular os pesos.
  */
 
+import { randomInt } from "node:crypto";
 import { one } from "../db.js";
 import { type GameState, getAbsolutePosition, SAFE_POSITIONS } from "./engine.js";
 
@@ -59,7 +60,17 @@ export async function loadSmartDiceConfig(): Promise<SmartDiceConfig> {
       `SELECT smart_dice FROM game_settings WHERE id = 'default' LIMIT 1`,
     );
     if (row?.smart_dice && typeof row.smart_dice === "object") {
-      cachedConfig = { ...DEFAULT_CONFIG, ...(row.smart_dice as Partial<SmartDiceConfig>) };
+      // Merge por secção: uma config parcial do backoffice (ex.: `mercy` sem
+      // `maxBoostPercent`) dava pesos NaN com um spread raso.
+      const cfg = row.smart_dice as Partial<SmartDiceConfig>;
+      cachedConfig = {
+        ...DEFAULT_CONFIG,
+        ...cfg,
+        mercy: { ...DEFAULT_CONFIG.mercy, ...cfg.mercy },
+        clutch: { ...DEFAULT_CONFIG.clutch, ...cfg.clutch },
+        comeback: { ...DEFAULT_CONFIG.comeback, ...cfg.comeback },
+        botBias: { ...DEFAULT_CONFIG.botBias!, ...cfg.botBias },
+      };
     } else {
       cachedConfig = DEFAULT_CONFIG;
     }
@@ -159,7 +170,7 @@ function findFinishNumbers(state: GameState, playerIndex: number): Set<number> {
 
 function weightedRoll(weights: number[]): number {
   const total = weights.reduce((a, b) => a + b, 0);
-  let r = Math.random() * total;
+  let r = (randomInt(0, 1_000_000) / 1_000_000) * total;
   for (let i = 0; i < weights.length; i++) {
     r -= weights[i];
     if (r <= 0) return i + 1;
@@ -168,7 +179,7 @@ function weightedRoll(weights: number[]): number {
 }
 
 function pureRoll(): number {
-  return Math.floor(Math.random() * 6) + 1;
+  return randomInt(1, 7);
 }
 
 function applyBotBias(

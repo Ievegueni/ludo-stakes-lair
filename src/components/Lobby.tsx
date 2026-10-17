@@ -179,26 +179,28 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
     }
   }, []);
 
+  const currentRoomId = currentRoom?.id;
+  const currentRoomStatus = currentRoom?.status;
   useEffect(() => {
     loadRooms();
     const unsub = api.realtime.subscribe((ev) => {
       if (ev.table === "rooms" || ev.table === "room_players") {
         loadRooms();
-        if (currentRoom) loadRoom(currentRoom.id);
+        if (currentRoomId) loadRoom(currentRoomId);
       }
     });
     return unsub;
-  }, [currentRoom?.id, loadRooms, loadRoom]);
+  }, [currentRoomId, loadRooms, loadRoom]);
 
   // Polling fallback: when in a waiting room, poll every 3s to catch status changes
   // (ensures game starts even if SSE is unreliable)
   useEffect(() => {
-    if (!currentRoom || currentRoom.status !== "waiting") return;
+    if (!currentRoomId || currentRoomStatus !== "waiting") return;
     const interval = setInterval(() => {
-      loadRoom(currentRoom.id);
+      loadRoom(currentRoomId);
     }, 3000);
     return () => clearInterval(interval);
-  }, [currentRoom?.id, currentRoom?.status, loadRoom]);
+  }, [currentRoomId, currentRoomStatus, loadRoom]);
 
   const createRoom = async () => {
     if (!user) return;
@@ -357,7 +359,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
 
       // Fallback: local state (should not normally happen)
       const humanIds = room.players.filter((p) => !p.is_bot && p.user_id).map((p) => p.user_id!);
-      let names: Record<string, string> = { ...playerNames };
+      const names: Record<string, string> = { ...playerNames };
       if (humanIds.length > 0) {
         try {
           const profiles = await api.profiles.getMany(humanIds);

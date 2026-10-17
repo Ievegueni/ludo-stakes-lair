@@ -9,6 +9,7 @@ import { runMigrations } from "./migrate.js";
 import { startRealtime, realtimeHandler } from "./realtime.js";
 import { verifyRealtimeToken } from "./auth.js";
 import { startRoomsCleanup } from "./workers/rooms-cleanup.js";
+import { startGameTicker } from "./workers/game-ticker.js";
 import authRoutes from "./routes/auth.js";
 import profileRoutes from "./routes/profiles.js";
 import walletRoutes from "./routes/wallet.js";
@@ -79,7 +80,7 @@ app.get("/api/realtime", (c) => {
   const token = c.req.query("token");
   const user = token ? verifyRealtimeToken(token) : null;
   if (!user) return c.json({ error: "unauthorized" }, 401);
-  return realtimeHandler(c);
+  return realtimeHandler(c, user.id);
 });
 
 // In production, serve static assets and SSR via TanStack Start
@@ -120,7 +121,7 @@ let ssrModulePromise: Promise<{ default: { fetch: (req: Request) => Promise<Resp
 function loadSSR(): Promise<{ default: { fetch: (req: Request) => Promise<Response> } }> {
   if (!ssrModulePromise) {
     // @ts-expect-error built only in production
-    ssrModulePromise = import("../../dist/server/index.js");
+    ssrModulePromise = import("../../dist/server/server.js");
   }
   return ssrModulePromise;
 }
@@ -155,6 +156,7 @@ async function main() {
   await runMigrations();
   await startRealtime();
   startRoomsCleanup();
+  startGameTicker();
   // Pré-aquecimento em paralelo — não bloqueia o serve
   void Promise.all([prewarmSSR(), prewarmDb()]);
   serve({ fetch: app.fetch, port }, (info) => {

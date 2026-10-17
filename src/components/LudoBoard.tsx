@@ -105,7 +105,6 @@ export function LudoBoard({
   const myUserId = currentUserId || players.find((p) => !p.isBot)?.id;
   const versionRef = useRef<number>(multiplayer?.version ?? 0);
   const lastPushedRef = useRef<string | null>(null);
-  const pushingRef = useRef<boolean>(false);
 
   const [gameState, setGameState] = useState<GameState>(() =>
     multiplayer?.initialState
@@ -131,7 +130,10 @@ export function LudoBoard({
   const [bursts, setBursts] = useState<
     Array<{ id: number; cx: number; cy: number; color: PlayerColor }>
   >([]);
-  const [autoPlay, setAutoPlay] = useState<Set<string>>(new Set());
+  // Auto-play: no modo local é estado do cliente; em multiplayer vem do
+  // servidor (state.autoPlay) — é o servidor que joga por quem está em auto.
+  const [localAutoPlay, setAutoPlay] = useState<Set<string>>(new Set());
+  const autoPlay = isMultiplayer ? new Set(gameState.autoPlay ?? []) : localAutoPlay;
   const [showAutoPlayBanner, setShowAutoPlayBanner] = useState(false);
   const burstIdRef = useRef(0);
   const logIdRef = useRef(0);
@@ -143,6 +145,24 @@ export function LudoBoard({
   const botTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
+  // Multiplayer: os avatares não vão no estado do jogo (limite do realtime),
+  // são buscados uma vez aos perfis.
+  const [avatars, setAvatars] = useState<Record<string, string | undefined>>({});
+  const humanIdsKey = gameState.players
+    .filter((p) => !p.isBot)
+    .map((p) => p.id)
+    .join(",");
+  useEffect(() => {
+    if (!isMultiplayer || !humanIdsKey) return;
+    api.profiles
+      .getMany(humanIdsKey.split(","))
+      .then((ps) =>
+        setAvatars(Object.fromEntries(ps.map((p) => [p.id, p.avatar_url ?? undefined]))),
+      )
+      .catch(() => {});
+  }, [isMultiplayer, humanIdsKey]);
+  const avatarOf = (p: Player) => avatars[p.id] ?? p.avatarUrl;
   const potTotal = betAmount * gameState.players.length;
 
   // Rotação do tabuleiro: a cor do utilizador local fica sempre em
@@ -169,15 +189,6 @@ export function LudoBoard({
         return 0;
     }
   })();
-
-  // Bot driver dinâmico: primeiro humano não-resigned. Substitui o conceito
-  // de "host" para processar bots e timeouts — assim o jogo continua mesmo
-  // que o host original saia ou desista.
-  const botDriverId = (() => {
-    const humans = gameState.players.filter((p) => !p.isBot && !p.resigned && !!p.id);
-    return humans.length > 0 ? humans[0].id : null;
-  })();
-  const isBotDriver = !isMultiplayer || (myUserId !== undefined && myUserId === botDriverId);
 
   // Find next non-resigned player index
   const nextActiveIdx = useCallback((playersArr: Player[], fromIdx: number) => {
@@ -345,59 +356,75 @@ export function LudoBoard({
     }
   }, [gameState, isMultiplayer, myUserId]);
 
-  // Push state to server (multiplayer only). Caller decides when to call.
-  const pushState = useCallback(
-    async (newState: GameState) => {
-      if (!isMultiplayer || !multiplayer) return;
-      const serialized = JSON.stringify(newState);
-      if (lastPushedRef.current === serialized) return;
-      lastPushedRef.current = serialized;
-      pushingRef.current = true;
-      try {
-        const r = await api.games.update(multiplayer.gameId, newState, versionRef.current);
-        versionRef.current = r.version;
-      } catch (err: any) {
-        // Version conflict: pull latest
-        if (err?.status === 409) {
-          try {
-            const fresh = await api.games.get(multiplayer.gameId);
-            versionRef.current = fresh.version;
-            setGameState(fresh.state as GameState);
-          } catch {}
-        } else {
-          console.error("pushState failed", err);
-        }
-      } finally {
-        pushingRef.current = false;
-      }
-    },
-    [isMultiplayer, multiplayer],
-  );
-
   // Subscribe to realtime updates (multiplayer only). Whenever the game row
   // changes, sync local state — unless we are the ones who just pushed it.
   useEffect(() => {
     if (!isMultiplayer || !multiplayer) return;
+    const apply = (incomingVersion: unknown, incomingState: GameState | undefined) => {
+      if (typeof incomingVersion !== "number" || !incomingState) return;
+      if (incomingVersion <= versionRef.current) return;
+      versionRef.current = incomingVersion;
+      lastPushedRef.current = JSON.stringify(incomingState);
+      setGameState(incomingState);
+    };
     const off = api.realtime.subscribe((ev) => {
       if (ev.table !== "games") return;
       if (ev.row?.id !== multiplayer.gameId) return;
       if (ev.event === "DELETE") return;
-      const incomingVersion = (ev.row as any).version;
-      const incomingState = (ev.row as any).state as GameState;
-      if (typeof incomingVersion !== "number" || !incomingState) return;
-      if (incomingVersion <= versionRef.current && !pushingRef.current) return;
-      versionRef.current = incomingVersion;
-      lastPushedRef.current = JSON.stringify(incomingState);
-      setGameState(incomingState);
+      // Linha grande demais para o pg_notify — vem só o id, busca por HTTP
+      if (ev.truncated) {
+        api.games
+          .get(multiplayer.gameId)
+          .then((g) => apply(g.version, g.state as GameState))
+          .catch(() => {});
+        return;
+      }
+      apply((ev.row as any).version, (ev.row as any).state as GameState);
     });
     return off;
   }, [isMultiplayer, multiplayer]);
 
-  // Turn timer — in multiplayer, only the host ticks.
-  // Quando o tempo expira, o jogador entra em AUTO-PLAY (bot joga por ele).
+  // Multiplayer: o contador é só visual — o servidor passa a vez quando o
+  // prazo expira (workers/game-ticker.ts). Cada novo estado traz turnTimer.
+  useEffect(() => {
+    if (!isMultiplayer || gameState.phase === "finished") return;
+    const t = setInterval(() => {
+      setGameState((prev) => ({ ...prev, turnTimer: Math.max(0, prev.turnTimer - 1) }));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [isMultiplayer, gameState.phase, gameState.currentPlayerIndex]);
+
+  // Avisa quando o servidor me pôs em auto-play por timeout
+  const iAmAuto = !!myUserId && autoPlay.has(myUserId);
+  useEffect(() => {
+    if (isMultiplayer && iAmAuto) setShowAutoPlayBanner(true);
+  }, [isMultiplayer, iAmAuto]);
+
+  const toggleAutoPlay = useCallback(
+    (enabled: boolean) => {
+      if (!myUserId) return;
+      if (isMultiplayer && multiplayer) {
+        api.games.autoplay(multiplayer.gameId, enabled).catch(() => {
+          toast.error("Não foi possível mudar o modo AUTO");
+        });
+      } else {
+        setAutoPlay((s) => {
+          const ns = new Set(s);
+          if (enabled) ns.add(myUserId);
+          else ns.delete(myUserId);
+          return ns;
+        });
+      }
+      setShowAutoPlayBanner(enabled);
+    },
+    [isMultiplayer, multiplayer, myUserId],
+  );
+
+  // Turn timer (modo local). Quando o tempo expira, o jogador entra em
+  // AUTO-PLAY (bot joga por ele).
   useEffect(() => {
     if (gameState.phase === "finished") return;
-    if (isMultiplayer && !isBotDriver) return;
+    if (isMultiplayer) return;
     timerRef.current = setInterval(() => {
       setGameState((prev) => {
         if (prev.phase === "finished") return prev;
@@ -422,7 +449,6 @@ export function LudoBoard({
             phase: "rolling" as const,
             consecutiveSixes: 0,
           };
-          if (isMultiplayer) pushState(ns);
           return ns;
         }
         const ns = { ...prev, turnTimer: prev.turnTimer - 1 };
@@ -432,21 +458,14 @@ export function LudoBoard({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [
-    gameState.phase,
-    gameState.currentPlayerIndex,
-    isMultiplayer,
-    isBotDriver,
-    pushState,
-    nextActiveIdx,
-  ]);
+  }, [gameState.phase, gameState.currentPlayerIndex, isMultiplayer, nextActiveIdx]);
 
   const handleRollDice = useCallback(() => {
     if (gameState.phase !== "rolling") return;
     // In multiplayer, only the player whose turn it is can roll.
     const cur = gameState.players[gameState.currentPlayerIndex];
-    if (isMultiplayer && cur && !cur.isBot && cur.id !== myUserId) return;
-    if (isMultiplayer && cur?.isBot && !isBotDriver) return;
+    // Multiplayer: só o próprio jogador lança — bots e auto-play são do servidor.
+    if (isMultiplayer && cur?.id !== myUserId) return;
     if (actionPendingRef.current) return;
 
     // --- Multiplayer: o dado é lançado NO SERVIDOR (anti-batota + RTP real).
@@ -550,14 +569,13 @@ export function LudoBoard({
         });
       }
     }, 100);
-  }, [gameState, addLog, isMultiplayer, multiplayer, isBotDriver, myUserId, nextActiveIdx]);
+  }, [gameState, addLog, isMultiplayer, multiplayer, myUserId, nextActiveIdx]);
 
   const handleMovePiece = useCallback(
     (pieceId: number) => {
       if (gameState.phase !== "moving" || !gameState.diceValue) return;
       const cp = gameState.players[gameState.currentPlayerIndex];
-      if (isMultiplayer && cp && !cp.isBot && cp.id !== myUserId) return;
-      if (isMultiplayer && cp?.isBot && !isBotDriver) return;
+      if (isMultiplayer && cp?.id !== myUserId) return;
       if (actionPendingRef.current) return;
 
       // --- Multiplayer: o movimento é validado e aplicado NO SERVIDOR.
@@ -680,7 +698,6 @@ export function LudoBoard({
       showNotification,
       isMultiplayer,
       multiplayer,
-      isBotDriver,
       myUserId,
       nextActiveIdx,
     ],
@@ -788,10 +805,9 @@ export function LudoBoard({
         turnTimer: 15,
         consecutiveSixes: 0,
       };
-      if (isMultiplayer) pushState(ns);
       return ns;
     });
-  }, [isMultiplayer, pushState, nextActiveIdx]);
+  }, [nextActiveIdx]);
 
   // Personalidade do bot: cada bot tem um "tempo de reacção" próprio e
   // estável (0.7x rápido a 1.4x pensativo), derivado do id — parece mais
@@ -802,11 +818,10 @@ export function LudoBoard({
     return 0.7 + (h % 100) / 140;
   };
 
-  // Bot auto-play — in multiplayer, only the host drives bots.
+  // Bot auto-play — só no modo local; em multiplayer o servidor joga pelos bots.
   useEffect(() => {
-    if (gameState.phase === "finished") return;
+    if (isMultiplayer || gameState.phase === "finished") return;
     if (!currentPlayer?.isBot) return;
-    if (isMultiplayer && !isBotDriver) return;
     const tempo = botTempo(currentPlayer.id);
     if (gameState.phase === "rolling") {
       botTimeoutRef.current = setTimeout(
@@ -829,23 +844,14 @@ export function LudoBoard({
     return () => {
       if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current);
     };
-  }, [
-    gameState,
-    currentPlayer,
-    isMultiplayer,
-    isBotDriver,
-    handleRollDice,
-    handleMovePiece,
-    nextTurn,
-  ]);
+  }, [gameState, currentPlayer, isMultiplayer, handleRollDice, handleMovePiece, nextTurn]);
 
   // Auto-play: quando um humano esta em auto-play, o bot AI joga por ele.
   const autoPlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (gameState.phase === "finished") return;
     if (!currentPlayer || currentPlayer.isBot || currentPlayer.resigned) return;
-    if (!autoPlay.has(currentPlayer.id)) return;
-    if (isMultiplayer && !isBotDriver) return;
+    if (isMultiplayer || !localAutoPlay.has(currentPlayer.id)) return;
 
     if (gameState.phase === "rolling") {
       autoPlayTimeoutRef.current = setTimeout(() => handleRollDice(), 600 + Math.random() * 800);
@@ -868,9 +874,8 @@ export function LudoBoard({
   }, [
     gameState,
     currentPlayer,
-    autoPlay,
+    localAutoPlay,
     isMultiplayer,
-    isBotDriver,
     handleRollDice,
     handleMovePiece,
     nextTurn,
@@ -1003,7 +1008,7 @@ export function LudoBoard({
         <PlayerAvatar
           name={player.name}
           color={player.color}
-          avatarUrl={player.avatarUrl}
+          avatarUrl={avatarOf(player)}
           size={38}
           isActive={isCurrent}
           isBot={player.isBot}
@@ -1152,7 +1157,7 @@ export function LudoBoard({
                   <PlayerAvatar
                     name={p.name}
                     color={p.color}
-                    avatarUrl={p.avatarUrl}
+                    avatarUrl={avatarOf(p)}
                     size={36}
                     isActive={isActive}
                     isBot={p.isBot}
@@ -1832,12 +1837,7 @@ export function LudoBoard({
             </div>
             <button
               onClick={() => {
-                setAutoPlay((s) => {
-                  const ns = new Set(s);
-                  ns.delete(myUserId!);
-                  return ns;
-                });
-                setShowAutoPlayBanner(false);
+                toggleAutoPlay(false);
                 toast.success("Modo AUTO desativado. Jogas tu agora!");
               }}
               className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105 active:scale-95"
@@ -1869,19 +1869,10 @@ export function LudoBoard({
               variant="outline"
               size="sm"
               onClick={() => {
-                setAutoPlay((s) => {
-                  const ns = new Set(s);
-                  if (ns.has(myUserId!)) {
-                    ns.delete(myUserId!);
-                    setShowAutoPlayBanner(false);
-                    toast.success("Modo AUTO desativado");
-                  } else {
-                    ns.add(myUserId!);
-                    setShowAutoPlayBanner(true);
-                    toast.info("Modo AUTO ativado — o bot joga por ti");
-                  }
-                  return ns;
-                });
+                const enable = !autoPlay.has(myUserId);
+                toggleAutoPlay(enable);
+                if (enable) toast.info("Modo AUTO ativado — o bot joga por ti");
+                else toast.success("Modo AUTO desativado");
               }}
               className={`gap-1.5 text-xs font-bold border-purple-500/50 transition-transform hover:scale-105 active:scale-95 shadow-md ${
                 autoPlay.has(myUserId)

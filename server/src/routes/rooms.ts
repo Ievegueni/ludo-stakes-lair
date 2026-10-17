@@ -45,9 +45,12 @@ app.get("/", async (c) => {
 app.post("/", async (c) => {
   const u = c.get("user");
   const body = await c.req.json<{ bet_amount?: number; is_private?: boolean }>();
-  const bet = Math.floor(body.bet_amount ?? 100);
+  const bet = Math.floor(Number(body.bet_amount));
   const isPrivate = !!body.is_private;
-  if (bet <= 0) return c.json({ error: "bad bet_amount" }, 400);
+  // Mesmo mínimo do Lobby (MIN_BET); máximo igual ao limite por transacção
+  if (!Number.isFinite(bet) || bet < 500 || bet > 10_000_000) {
+    return c.json({ error: "bad bet_amount" }, 400);
+  }
 
   const client = await pool.connect();
   try {
@@ -95,32 +98,12 @@ app.get("/by-code/:code", async (c) => {
 });
 
 app.get("/:id", async (c) => {
-  const full = await loadRoomWithPlayers(c.req.param("id"));
-  if (!full) return c.json({ error: "not found" }, 404);
-  return c.json({ room: full });
-});
-
-app.patch("/:id", async (c) => {
   const u = c.get("user");
-  const id = c.req.param("id");
-  const body = await c.req.json<{ status?: string }>();
-  const room = await one<{ host_id: string }>("SELECT host_id FROM rooms WHERE id = $1", [id]);
-  if (!room) return c.json({ error: "not found" }, 404);
-  if (room.host_id !== u.id) return c.json({ error: "forbidden" }, 403);
-  const fields: string[] = [];
-  const values: unknown[] = [];
-  let i = 1;
-  if (body.status && ["waiting", "playing", "finished"].includes(body.status)) {
-    fields.push(`status = $${i++}`);
-    values.push(body.status);
-  }
-  if (fields.length === 0) return c.json({ error: "nothing to update" }, 400);
-  values.push(id);
-  const updated = await one(
-    `UPDATE rooms SET ${fields.join(", ")} WHERE id = $${i} RETURNING *`,
-    values,
-  );
-  return c.json({ room: updated });
+  const full = await loadRoomWithPlayers(c.req.param("id"));
+  // Sala privada só é visível a quem lá está (o código é o convite)
+  const isMember = full?.players.some((p: any) => p.user_id === u.id);
+  if (!full || (full.is_private && !isMember)) return c.json({ error: "not found" }, 404);
+  return c.json({ room: full });
 });
 
 // Entrar na sala — debita aposta do jogador atomicamente
@@ -200,6 +183,7 @@ app.post("/:id/bots", async (c) => {
   const full = await loadRoomWithPlayers(id);
   if (!full) return c.json({ error: "not found" }, 404);
   if (full.host_id !== u.id) return c.json({ error: "forbidden" }, 403);
+  if (full.status !== "waiting") return c.json({ error: "room not joinable" }, 400);
   if (full.players.length >= full.max_players) {
     return c.json({ error: "room full" }, 400);
   }
@@ -288,6 +272,17 @@ app.post("/:id/leave", async (c) => {
         );
         if (Number(remainRes.rows[0]?.count ?? 0) === 0) {
           await client.query("DELETE FROM rooms WHERE id = $1", [id]);
+        } else if (room.host_id === u.id) {
+          // O host saiu mas há humanos: passa o host ao seguinte (senão
+          // ninguém conseguia iniciar o jogo e a sala ficava presa).
+          await client.query(
+            `UPDATE rooms SET host_id = (
+               SELECT user_id FROM room_players
+               WHERE room_id = $1 AND is_bot = false AND user_id IS NOT NULL
+               ORDER BY player_index LIMIT 1
+             ) WHERE id = $1`,
+            [id],
+          );
         }
       }
     }

@@ -12,6 +12,8 @@ const TOKEN_TTL = "30d";
 export interface AuthUser {
   id: string;
   phone: string;
+  /** Incrementado no logout — invalida todos os tokens emitidos antes. */
+  tokenVersion?: number;
 }
 
 export function hashPassword(pw: string) {
@@ -23,7 +25,7 @@ export function verifyPassword(pw: string, hash: string) {
 }
 
 export function signToken(user: AuthUser) {
-  return jwt.sign({ sub: user.id, phone: user.phone }, JWT_SECRET, {
+  return jwt.sign({ sub: user.id, phone: user.phone, tv: user.tokenVersion ?? 0 }, JWT_SECRET, {
     expiresIn: TOKEN_TTL,
   });
 }
@@ -33,8 +35,11 @@ export function verifyToken(token: string): AuthUser | null {
     const decoded = jwt.verify(token, JWT_SECRET) as {
       sub: string;
       phone: string;
+      tv?: number;
+      scope?: string;
     };
-    return { id: decoded.sub, phone: decoded.phone };
+    if (decoded.scope) return null; // token de realtime não serve para a API
+    return { id: decoded.sub, phone: decoded.phone, tokenVersion: decoded.tv ?? 0 };
   } catch {
     return null;
   }
@@ -69,12 +74,13 @@ export async function requireAuth(c: Context, next: Next) {
   if (!token) return c.json({ error: "unauthorized" }, 401);
   const user = verifyToken(token);
   if (!user) return c.json({ error: "invalid token" }, 401);
-  const dbUser = await one<{ id: string; phone: string }>(
-    "SELECT id, phone FROM users WHERE id = $1",
+  const dbUser = await one<{ id: string; phone: string; token_version: number }>(
+    "SELECT id, phone, token_version FROM users WHERE id = $1",
     [user.id],
   );
   if (!dbUser) return c.json({ error: "user not found" }, 401);
-  c.set("user", dbUser);
+  if (dbUser.token_version !== user.tokenVersion) return c.json({ error: "invalid token" }, 401);
+  c.set("user", { id: dbUser.id, phone: dbUser.phone, tokenVersion: dbUser.token_version });
   await next();
 }
 

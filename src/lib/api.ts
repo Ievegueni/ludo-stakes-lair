@@ -124,6 +124,9 @@ export const api = {
       }
     },
     signOut() {
+      // Invalida o token no servidor (best-effort — sai localmente na mesma)
+      if (getToken())
+        void request("/api/auth/logout", { method: "POST", body: "{}" }).catch(() => {});
       setToken(null);
       authListeners.forEach((l) => l(null));
     },
@@ -196,13 +199,6 @@ export const api = {
       const r = await request<{ room: Room }>(`/api/rooms/by-code/${code}`);
       return r.room;
     },
-    async setStatus(id: string, status: Room["status"]) {
-      const r = await request<{ room: Room }>(`/api/rooms/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
-      });
-      return r.room;
-    },
     async join(id: string) {
       const r = await request<{ room: Room }>(`/api/rooms/${id}/join`, {
         method: "POST",
@@ -231,20 +227,19 @@ export const api = {
       const r = await request<{ messages: any[] }>(`/api/games/${gameId}/chat`);
       return r.messages;
     },
-    async send(
-      gameId: string,
-      payload: {
-        author_name: string;
-        color: string;
-        text?: string;
-        gift?: { emoji: string; name: string; price: number; toName: string; toColor: string };
-      },
-    ) {
+    async send(gameId: string, text: string) {
       const r = await request<{ message: any }>(`/api/games/${gameId}/chat`, {
         method: "POST",
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ text }),
       });
       return r.message;
+    },
+    /** Gift: o servidor debita, credita o destinatário e publica no chat. */
+    async gift(gameId: string, giftId: string, toPlayerId: string) {
+      return request<{ balance: number }>(`/api/games/${gameId}/gift`, {
+        method: "POST",
+        body: JSON.stringify({ giftId, toPlayerId }),
+      });
     },
   },
 
@@ -268,10 +263,11 @@ export const api = {
       const r = await request<{ game: GameRecord }>(`/api/games/${id}`);
       return r.game;
     },
-    async update(id: string, state: any, baseVersion: number) {
-      const r = await request<{ game: GameRecord }>(`/api/games/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ state, baseVersion }),
+    /** Liga/desliga o auto-play do próprio jogador (o servidor joga por ele). */
+    async autoplay(id: string, enabled: boolean) {
+      const r = await request<{ game: GameRecord }>(`/api/games/${id}/autoplay`, {
+        method: "POST",
+        body: JSON.stringify({ enabled }),
       });
       return r.game;
     },
@@ -325,6 +321,8 @@ export const api = {
         table: string;
         event: "INSERT" | "UPDATE" | "DELETE";
         row: Record<string, any>;
+        /** Linha grande demais para o pg_notify: `row` só tem o id. */
+        truncated?: boolean;
       }) => void,
     ): () => void {
       if (!getToken()) return () => {};
