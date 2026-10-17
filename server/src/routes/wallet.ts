@@ -8,10 +8,14 @@ app.use("*", requireAuth);
 
 app.get("/", async (c) => {
   const u = c.get("user");
-  const wallet = await one<{ balance: string }>("SELECT balance FROM wallets WHERE user_id = $1", [
-    u.id,
-  ]);
-  return c.json({ balance: wallet ? Number(wallet.balance) : 0 });
+  const wallet = await one<{ balance: string; bonus_balance: string }>(
+    "SELECT balance, bonus_balance FROM wallets WHERE user_id = $1",
+    [u.id],
+  );
+  return c.json({
+    balance: wallet ? Number(wallet.balance) : 0,
+    bonus: wallet ? Number(wallet.bonus_balance) : 0,
+  });
 });
 
 app.get("/transactions", async (c) => {

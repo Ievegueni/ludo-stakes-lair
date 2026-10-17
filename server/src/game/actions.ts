@@ -12,6 +12,7 @@ import {
   nextActiveIdx,
 } from "./engine.js";
 import { smartRollDice, loadSmartDiceConfig } from "./smart-dice.js";
+import { bumpMission, XP_PER_GAME, XP_PER_WIN } from "./missions.js";
 
 export const HUMAN_ROLL_SECONDS = 15;
 export const HUMAN_MOVE_SECONDS = 30;
@@ -108,8 +109,10 @@ export async function saveState(client: PoolClient, gameId: string, ns: GameStat
 
 /**
  * Liquida um jogo terminado: credita o prémio (pot × 0.95) ao vencedor
- * humano e marca o jogo/sala como finalizados. Idempotente via flag
- * `settled` (o caller deve garantir FOR UPDATE na linha do jogo).
+ * humano e marca o jogo/sala como finalizados. A parte do pote paga com
+ * bónus é paga em bónus. Conta missões e XP nos jogos a dinheiro.
+ * Idempotente via flag `settled` (o caller deve garantir FOR UPDATE na
+ * linha do jogo).
  */
 export async function settleGame(
   client: PoolClient,
@@ -122,26 +125,39 @@ export async function settleGame(
     [roomId],
   );
   const betAmount = Number(roomRes.rows[0]?.bet_amount ?? 0);
-  const paidRes = await client.query<{ user_id: string }>(
-    "SELECT user_id FROM room_players WHERE room_id = $1 AND bet_paid = true AND user_id IS NOT NULL",
+  const paidRes = await client.query<{ user_id: string; bet_bonus: string }>(
+    `SELECT user_id, bet_bonus FROM room_players
+     WHERE room_id = $1 AND bet_paid = true AND user_id IS NOT NULL`,
     [roomId],
   );
   const paidUserIds = paidRes.rows.map((r) => r.user_id);
   const pot = betAmount * paidUserIds.length;
+  const bonusPot = paidRes.rows.reduce((sum, r) => sum + Number(r.bet_bonus), 0);
   const prize = Math.floor(pot * 0.95);
+  const bonusPrize = Math.floor(bonusPot * 0.95);
+  const realPrize = prize - bonusPrize;
 
   const winnerId = state.winner!;
   const winnerPlayer = state.players.find((p) => p.id === winnerId);
   const winnerIsBot = !!winnerPlayer?.isBot;
+  const winnerPaid = !winnerIsBot && paidUserIds.includes(winnerId) && prize > 0;
 
-  if (!winnerIsBot && paidUserIds.includes(winnerId) && prize > 0) {
+  if (winnerPaid) {
     await client.query(
-      "UPDATE wallets SET balance = balance + $1, updated_at = now() WHERE user_id = $2",
-      [prize, winnerId],
+      `UPDATE wallets SET balance = balance + $1, bonus_balance = bonus_balance + $2,
+         updated_at = now() WHERE user_id = $3`,
+      [realPrize, bonusPrize, winnerId],
     );
     await client.query(
       "INSERT INTO transactions (user_id, type, amount, description) VALUES ($1, $2, $3, $4)",
-      [winnerId, "win", prize, `Vitória — prémio de ${prize.toLocaleString()} Kz`],
+      [
+        winnerId,
+        "win",
+        prize,
+        bonusPrize > 0
+          ? `Vitória — prémio de ${prize.toLocaleString()} Kz (${bonusPrize.toLocaleString()} Kz em bónus)`
+          : `Vitória — prémio de ${prize.toLocaleString()} Kz`,
+      ],
     );
   }
 
@@ -150,14 +166,36 @@ export async function settleGame(
     [winnerIsBot ? null : winnerId, prize, gameId],
   );
   await client.query("UPDATE rooms SET status = 'finished' WHERE id = $1", [roomId]);
+  if (betAmount === 0) return; // treino: sem dinheiro, sem ledger, sem missões
 
-  // Ledger da casa: pot/prémio/rake por jogo — base do cálculo de RTP real.
-  // Se o vencedor é bot, o pot inteiro é rake (a casa fica com tudo).
-  const paidOut = !winnerIsBot && paidUserIds.includes(winnerId) ? prize : 0;
+  // Missões e XP (só jogos a dinheiro)
+  for (const uid of paidUserIds) {
+    await bumpMission(client, uid, "play3");
+    const xp = uid === winnerId && winnerPaid ? XP_PER_GAME + XP_PER_WIN : XP_PER_GAME;
+    await client.query("UPDATE profiles SET xp = xp + $1 WHERE id = $2", [xp, uid]);
+  }
+  if (winnerPaid) await bumpMission(client, winnerId, "win1");
+
+  // Ledger da casa: pot/prémio/rake em dinheiro real (base do RTP real) e o
+  // bónus à parte. Base do ranking semanal. Se ninguém humano ganhou, a casa
+  // fica com o pote.
+  const realPot = pot - bonusPot;
+  const paidOutReal = winnerPaid ? realPrize : 0;
   await client.query(
-    `INSERT INTO house_ledger (game_id, room_id, pot, prize, rake, winner_user_id, winner_is_bot)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO house_ledger
+       (game_id, room_id, pot, prize, rake, winner_user_id, winner_is_bot, bonus_pot, bonus_prize)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
      ON CONFLICT (game_id) DO NOTHING`,
-    [gameId, roomId, pot, paidOut, pot - paidOut, winnerIsBot ? null : winnerId, winnerIsBot],
+    [
+      gameId,
+      roomId,
+      realPot,
+      paidOutReal,
+      realPot - paidOutReal,
+      winnerPaid ? winnerId : null,
+      winnerIsBot,
+      bonusPot,
+      winnerPaid ? bonusPrize : 0,
+    ],
   );
 }

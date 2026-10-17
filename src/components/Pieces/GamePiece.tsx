@@ -18,6 +18,8 @@ interface GamePieceProps {
   state: PieceState;
   onClick?: () => void;
   waypoints?: Waypoint[];
+  /** Pode ser comida no próximo lançamento — anel vermelho pulsante. */
+  threatened?: boolean;
 }
 
 const SHADOW = "rgba(0,0,0,0.55)";
@@ -25,7 +27,16 @@ const SHADOW = "rgba(0,0,0,0.55)";
 // Tempo entre cada casa (ms). Ajustar aqui para mais rapido/lento.
 const STEP_DELAY = 160;
 
-export function GamePiece({ color, cx, cy, r, state, onClick, waypoints }: GamePieceProps) {
+export function GamePiece({
+  color,
+  cx,
+  cy,
+  r,
+  state,
+  onClick,
+  waypoints,
+  threatened,
+}: GamePieceProps) {
   const isMovable = state === "movable";
   const isTurn = state === "turn";
 
@@ -128,6 +139,20 @@ export function GamePiece({ color, cx, cy, r, state, onClick, waypoints }: GameP
             initial={{ opacity: 0.35, scale: 0.85 }}
             animate={{ opacity: [0.35, 0.85, 0.35], scale: [0.85, 1.1, 0.85] }}
             transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+            pointerEvents="none"
+          />
+        )}
+
+        {threatened && (
+          <motion.circle
+            cx={0}
+            cy={0}
+            r={r * 1.3}
+            fill="none"
+            stroke="#ef4444"
+            strokeWidth={r * 0.16}
+            animate={{ opacity: [0.25, 1, 0.25], scale: [0.95, 1.15, 0.95] }}
+            transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut" }}
             pointerEvents="none"
           />
         )}

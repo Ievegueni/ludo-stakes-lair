@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import confetti from "canvas-confetti";
-import { Crown, Flag } from "lucide-react";
+import { Crown, Flag, Share2 } from "lucide-react";
+import { toast } from "sonner";
 import { Trophy } from "./Trophy";
 import { playSound } from "@/utils/sound";
 import type { Player, PlayerColor } from "@/lib/ludo-engine";
@@ -229,7 +230,11 @@ export function VictoryModal({
                           {isYou && !p.isBot && (
                             <span className="text-[9px] uppercase font-bold text-white/50">tu</span>
                           )}
-                          {/* bots não são identificados visualmente — parecem humanos */}
+                          {p.isBot && (
+                            <span className="text-[9px] uppercase font-bold text-indigo-300">
+                              bot
+                            </span>
+                          )}
                           {isWinner && (
                             <Crown size={12} className="text-amber-400" strokeWidth={2.5} />
                           )}
@@ -247,6 +252,35 @@ export function VictoryModal({
                   <span>Rake 5%</span>
                 </div>
               </div>
+            )}
+
+            {isMe && (
+              <button
+                onClick={async () => {
+                  const won = pot && pot > 0 ? Math.floor(pot * 0.95) : 0;
+                  const text = won
+                    ? `Ganhei ${won.toLocaleString()} Kz no NANTER Ludo! 🎲👑 Achas que me ganhas?`
+                    : "Ganhei uma partida no NANTER Ludo! 🎲👑 Achas que me ganhas?";
+                  const url = window.location.origin;
+                  try {
+                    if (navigator.share) await navigator.share({ text, url });
+                    else {
+                      await navigator.clipboard.writeText(`${text} ${url}`);
+                      toast.success("Copiado! Cola onde quiseres.");
+                    }
+                  } catch {
+                    /* utilizador cancelou */
+                  }
+                }}
+                className="w-full mb-2 py-3 rounded-xl font-extrabold uppercase tracking-wider text-white flex items-center justify-center gap-2 transition-transform hover:scale-[1.02] active:scale-95"
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                }}
+              >
+                <Share2 size={16} />
+                Partilhar vitória
+              </button>
             )}
 
             <button

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { one, query } from "../db.js";
 import { requireAuth } from "../auth.js";
+import { levelFromXp } from "../game/missions.js";
 
 const app = new Hono();
 
@@ -55,11 +56,19 @@ app.get("/", async (c) => {
   const idsParam = c.req.query("ids") || "";
   const ids = idsParam.split(",").filter(Boolean);
   if (ids.length === 0) return c.json({ profiles: [] });
-  const rows = await query(
-    "SELECT id, display_name, avatar_url FROM profiles WHERE id = ANY($1::uuid[])",
+  const rows = await query<{
+    id: string;
+    display_name: string;
+    avatar_url: string | null;
+    equipped_frame: string | null;
+    xp: number;
+  }>(
+    "SELECT id, display_name, avatar_url, equipped_frame, xp FROM profiles WHERE id = ANY($1::uuid[])",
     [ids],
   );
-  return c.json({ profiles: rows });
+  return c.json({
+    profiles: rows.map(({ xp, ...p }) => ({ ...p, level: levelFromXp(xp) })),
+  });
 });
 
 export default app;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   type GameState,
   type Player,
@@ -7,6 +7,7 @@ import {
   getMovablePieces,
   movePiece,
   botChoosePiece,
+  captureThreats,
   generateBoardPath,
   generateHomeStretch,
   START_POSITIONS,
@@ -149,6 +150,7 @@ export function LudoBoard({
   // Multiplayer: os avatares não vão no estado do jogo (limite do realtime),
   // são buscados uma vez aos perfis.
   const [avatars, setAvatars] = useState<Record<string, string | undefined>>({});
+  const [frames, setFrames] = useState<Record<string, string | null>>({});
   const humanIdsKey = gameState.players
     .filter((p) => !p.isBot)
     .map((p) => p.id)
@@ -157,13 +159,41 @@ export function LudoBoard({
     if (!isMultiplayer || !humanIdsKey) return;
     api.profiles
       .getMany(humanIdsKey.split(","))
-      .then((ps) =>
-        setAvatars(Object.fromEntries(ps.map((p) => [p.id, p.avatar_url ?? undefined]))),
-      )
+      .then((ps) => {
+        setAvatars(Object.fromEntries(ps.map((p) => [p.id, p.avatar_url ?? undefined])));
+        setFrames(Object.fromEntries(ps.map((p) => [p.id, p.equipped_frame ?? null])));
+      })
       .catch(() => {});
   }, [isMultiplayer, humanIdsKey]);
   const avatarOf = (p: Player) => avatars[p.id] ?? p.avatarUrl;
-  const potTotal = betAmount * gameState.players.length;
+  // Igual ao settle do servidor: só humanos pagam aposta
+  const potTotal = betAmount * gameState.players.filter((p) => !p.isBot).length;
+
+  // Drama de captura: só apresentação, calculado a partir do estado actual
+  const threats = useMemo(
+    () =>
+      gameState.phase === "rolling" && !gameState.winner
+        ? captureThreats(gameState, gameState.currentPlayerIndex)
+        : new Map<string, number[]>(),
+    [gameState],
+  );
+  const threatTurn = gameState.players[gameState.currentPlayerIndex];
+  const threatDice = [...new Set([...threats.values()].flat())].sort();
+  const myColorForThreat = gameState.players.find((p) => p.id === myUserId)?.color;
+  const iAmThreatened =
+    !!myColorForThreat && [...threats.keys()].some((k) => k.startsWith(`${myColorForThreat}-`));
+  const threatBanner =
+    threats.size === 0 || !threatTurn
+      ? null
+      : threatTurn.id === myUserId
+        ? `🎯 Tira ${threatDice.join(" ou ")} para comer!`
+        : iAmThreatened
+          ? `⚠️ ${threatTurn.name} pode comer a tua peça!`
+          : `🎯 ${threatTurn.name} pode comer!`;
+  const threatKey = threatBanner ? `${gameState.currentPlayerIndex}:${threatBanner}` : "";
+  useEffect(() => {
+    if (threatKey) playSound("tension");
+  }, [threatKey]);
 
   // Rotação do tabuleiro: a cor do utilizador local fica sempre em
   // bottom-left (frente). Cada cliente roda independentemente — o engine
@@ -1009,6 +1039,7 @@ export function LudoBoard({
           name={player.name}
           color={player.color}
           avatarUrl={avatarOf(player)}
+          frame={frames[player.id]}
           size={38}
           isActive={isCurrent}
           isBot={player.isBot}
@@ -1097,6 +1128,19 @@ export function LudoBoard({
 
   return (
     <div className="flex flex-col lg:flex-row lg:gap-4 w-full lg:max-w-[1200px] mx-auto h-[100dvh] lg:h-[calc(100vh-2rem)] relative overflow-hidden">
+      {threatBanner && !notification && (
+        <div
+          key={threatKey}
+          className="absolute top-8 left-1/2 -translate-x-1/2 z-40 font-extrabold px-4 py-1.5 rounded-full text-xs animate-pulse shadow-lg whitespace-nowrap"
+          style={{
+            background: iAmThreatened ? "#dc2626" : "var(--grad-pot)",
+            color: iAmThreatened ? "#fff" : "#3f2a07",
+          }}
+        >
+          {threatBanner}
+        </div>
+      )}
+
       {/* Notification banner */}
       {notification && (
         <div className="absolute top-0 left-1/2 -translate-x-1/2 z-50 bg-yellow-500 text-black font-bold px-6 py-2 rounded-b-xl flex items-center gap-2 text-sm animate-bounce shadow-lg">
@@ -1158,6 +1202,7 @@ export function LudoBoard({
                     name={p.name}
                     color={p.color}
                     avatarUrl={avatarOf(p)}
+                    frame={frames[p.id]}
                     size={36}
                     isActive={isActive}
                     isBot={p.isBot}
@@ -1790,6 +1835,7 @@ export function LudoBoard({
                           state={state}
                           onClick={isMovable ? () => handleMovePiece(piece.id) : undefined}
                           waypoints={waypoints}
+                          threatened={threats.has(pieceKey)}
                         />
                       );
                     }),

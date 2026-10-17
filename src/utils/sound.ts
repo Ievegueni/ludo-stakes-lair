@@ -17,7 +17,8 @@ export type SoundName =
   | "button-click"
   | "chat-message"
   | "gift-received"
-  | "timer-tick";
+  | "timer-tick"
+  | "tension";
 
 const MUTE_KEY = "nanter.sound.muted";
 
@@ -221,6 +222,14 @@ function soundTimerTick(ac: AudioContext) {
   playNoise(ac, 0.03, 0.01, 0, 6000);
 }
 
+function soundTension(ac: AudioContext) {
+  // Batimento cardiaco duplo — ha uma captura em jogo
+  [0, 0.22].forEach((d, i) => {
+    playTone(ac, 70, "sine", i === 0 ? 0.35 : 0.25, 0.18, d);
+    playTone(ac, 140, "sine", 0.08, 0.1, d);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Mapa de sons
 // ---------------------------------------------------------------------------
@@ -238,6 +247,7 @@ const SOUND_MAP: Record<SoundName, (ac: AudioContext) => void> = {
   "chat-message": soundChatMessage,
   "gift-received": soundGiftReceived,
   "timer-tick": soundTimerTick,
+  tension: soundTension,
 };
 
 // ---------------------------------------------------------------------------

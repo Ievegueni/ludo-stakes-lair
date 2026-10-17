@@ -195,6 +195,33 @@ export function movePiece(
   return { newState, captured };
 }
 
+/**
+ * Peças adversárias que o jogador `idx` pode comer no próximo lançamento.
+ * Só apresentação: simula cada dado com o próprio motor, não mexe no dado.
+ * Devolve `${color}-${pieceId}` → valores do dado que a comem.
+ */
+export function captureThreats(state: GameState, idx: number): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  const player = state.players[idx];
+  if (!player) return out;
+  for (let d = 1; d <= 6; d++) {
+    for (const pid of getMovablePieces(player, d)) {
+      const { newState, captured } = movePiece(state, idx, pid, d);
+      if (!captured) continue;
+      newState.players.forEach((op, oi) => {
+        if (oi === idx) return;
+        op.pieces.forEach((pc, k) => {
+          if (pc.position !== -1 || state.players[oi].pieces[k].position < 0) return;
+          const key = `${op.color}-${pc.id}`;
+          const dice = out.get(key) ?? [];
+          if (!dice.includes(d)) out.set(key, [...dice, d]);
+        });
+      });
+    }
+  }
+  return out;
+}
+
 // Bot AI: choose best piece to move
 // Avalia cada peca movivel com um sistema de pontuacao para criar um bot
 // que parece humano — varia entre agressivo, defensivo e oportunista.

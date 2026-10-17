@@ -15,6 +15,8 @@ import {
   Wallet,
   Lock,
   Globe,
+  Bot,
+  Zap,
 } from "lucide-react";
 import type { PlayerColor } from "@/lib/ludo-engine";
 import { PlayerAvatar } from "@/components/PlayerAvatar";
@@ -27,105 +29,6 @@ const COLOR_LABELS: Record<PlayerColor, string> = {
   yellow: "Amarelo",
 };
 
-// Nomes próprios + apelidos típicos angolanos. Os "bots" são apresentados
-// como humanos (sem badge "🤖") para criar a sensação de jogo realista.
-const FIRST_NAMES = [
-  "Pedro",
-  "João",
-  "Manuel",
-  "António",
-  "Carlos",
-  "Paulo",
-  "Francisco",
-  "José",
-  "Rui",
-  "Diogo",
-  "André",
-  "Ricardo",
-  "Bruno",
-  "Tiago",
-  "Hugo",
-  "Miguel",
-  "Luís",
-  "Nuno",
-  "Vasco",
-  "Filipe",
-  "Sérgio",
-  "Henrique",
-  "Bernardo",
-  "Domingos",
-  "Mateus",
-  "Lourenço",
-  "Marcelo",
-  "Romeu",
-  "Tomás",
-  "Wilson",
-  "Maria",
-  "Ana",
-  "Beatriz",
-  "Carla",
-  "Catarina",
-  "Cláudia",
-  "Cristina",
-  "Daniela",
-  "Diana",
-  "Helena",
-  "Inês",
-  "Joana",
-  "Júlia",
-  "Laura",
-  "Leonor",
-  "Luísa",
-  "Mariana",
-  "Marta",
-  "Mónica",
-  "Patrícia",
-  "Raquel",
-  "Rita",
-  "Rosa",
-  "Sandra",
-  "Sara",
-  "Sílvia",
-  "Sofia",
-  "Susana",
-  "Teresa",
-  "Vanessa",
-  "Yolanda",
-];
-const LAST_NAMES = [
-  "Silva",
-  "Santos",
-  "Sousa",
-  "Pereira",
-  "Oliveira",
-  "Costa",
-  "Carvalho",
-  "Almeida",
-  "Lima",
-  "Rodrigues",
-  "Ferreira",
-  "Martins",
-  "Gomes",
-  "Cardoso",
-  "Mendes",
-  "Pinto",
-  "Barbosa",
-  "Cunha",
-  "Vieira",
-  "Tavares",
-  "Domingos",
-  "Quissende",
-  "Bonga",
-  "Mungunza",
-  "Capapelo",
-  "Tchindande",
-];
-
-function generateRandomName(): string {
-  const first = FIRST_NAMES[Math.floor(Math.random() * FIRST_NAMES.length)]!;
-  const last = LAST_NAMES[Math.floor(Math.random() * LAST_NAMES.length)]!;
-  return `${first} ${last}`;
-}
 const BET_AMOUNTS = [500, 1000, 5000];
 const MIN_BET = 500;
 
@@ -227,15 +130,17 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
     }
   };
 
-  const joinRoom = async (roomId: string) => {
-    if (!user) return;
+  const joinRoom = async (roomId: string, quiet = false): Promise<boolean> => {
+    if (!user) return false;
     try {
       const room = await api.rooms.join(roomId);
       setCurrentRoom(room);
       loadRoom(room.id);
       onBalanceRefresh?.();
       toast.success(`Entraste! Aposta de ${room.bet_amount.toLocaleString()} Kz debitada.`);
+      return true;
     } catch (err: any) {
+      if (quiet) return false;
       const msg = err?.message || "";
       const data = err?.data as { required?: number; available?: number } | undefined;
       if (msg.includes("insufficient") || data?.required !== undefined) {
@@ -249,6 +154,31 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
       } else {
         toast.error(msg || "Erro ao entrar na sala");
       }
+      return false;
+    }
+  };
+
+  /** Jogo rápido: entra na sala do nível mais próximo ou abre uma pública. */
+  const quickMatch = async () => {
+    if (!user) return;
+    if (balance < selectedBet) {
+      toast.error("Saldo insuficiente!");
+      return;
+    }
+    try {
+      const id = await api.rooms.match(selectedBet);
+      // Se outra pessoa encheu a sala entretanto, cria uma nova
+      if (id && (await joinRoom(id, true))) return;
+      const room = await api.rooms.create(selectedBet, false);
+      loadRoom(room.id);
+      onBalanceRefresh?.();
+      toast.success("Sala aberta — à espera de adversários do teu nível");
+    } catch (err) {
+      toast.error(
+        (err as Error)?.message?.includes("insufficient")
+          ? "Saldo insuficiente!"
+          : "Erro no jogo rápido",
+      );
     }
   };
 
@@ -265,45 +195,29 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
     }
   };
 
-  /**
-   * Preenche todas as vagas restantes da sala com "jogadores" — internamente
-   * são bots, mas com nomes humanos aleatórios para parecerem reais.
-   */
-  const fillSeats = async () => {
-    if (!currentRoom || !user) return;
-    if (currentRoom.host_id !== user.id) {
-      toast.error("Só o anfitrião pode preencher vagas");
-      return;
-    }
-    const slotsToFill = currentRoom.max_players - currentRoom.players.length;
-    if (slotsToFill <= 0) {
-      toast.error("Sala já está cheia");
-      return;
-    }
-    // Adiciona em sequência para evitar colisões de cor/index no servidor
-    let lastRoom = currentRoom;
-    const usedNames = new Set(lastRoom.players.map((p) => p.bot_name).filter(Boolean));
-    let added = 0;
-    for (let i = 0; i < slotsToFill; i++) {
-      // Garantir nome único
-      let name = generateRandomName();
-      let attempts = 0;
-      while (usedNames.has(name) && attempts < 10) {
-        name = generateRandomName();
-        attempts++;
-      }
-      usedNames.add(name);
+  /** Treino: preenche as vagas com bots (só salas sem aposta). */
+  const fillSeats = async (room: Room | null = currentRoom) => {
+    if (!room || !user) return;
+    // Em sequência para evitar colisões de cor/index no servidor
+    for (let i = room.players.length; i < room.max_players; i++) {
       try {
-        lastRoom = await api.rooms.addBot(currentRoom.id, name);
-        setCurrentRoom(lastRoom);
-        added++;
+        setCurrentRoom(await api.rooms.addBot(room.id));
       } catch (err: any) {
-        toast.error(err.message || "Erro ao preencher vaga");
+        toast.error(err.message || "Erro ao adicionar bot");
         break;
       }
     }
-    if (added > 0) {
-      toast.success(`${added} ${added === 1 ? "jogador adicionado" : "jogadores adicionados"}`);
+  };
+
+  const startPractice = async () => {
+    if (!user) return;
+    try {
+      const room = await api.rooms.create(0);
+      setCurrentRoom(room);
+      await fillSeats(room);
+      loadRoom(room.id);
+    } catch {
+      toast.error("Erro ao criar treino");
     }
   };
 
@@ -409,6 +323,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
 
   // Room view — vidro + acentos dourados
   if (currentRoom) {
+    const isPractice = currentRoom.bet_amount === 0;
     const glassCard: React.CSSProperties = {
       background: "rgba(255,255,255,0.05)",
       backdropFilter: "blur(16px)",
@@ -476,7 +391,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              {currentRoom.bet_amount.toLocaleString()} Kz
+              {isPractice ? "Treino" : `${currentRoom.bet_amount.toLocaleString()} Kz`}
             </p>
           </div>
         </div>
@@ -502,15 +417,17 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
                     color={p.color as PlayerColor}
                     size={36}
                     isBot={p.is_bot}
+                    frame={p.equipped_frame}
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-bold text-foreground truncate">{displayName}</p>
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
                       {COLOR_LABELS[p.color as PlayerColor]}
+                      {p.level ? ` · Nv. ${p.level}` : ""}
                     </p>
                   </div>
-                  {/* Estado de pagamento — bots não pagam, humanos sim */}
-                  {!p.is_bot && (
+                  {/* Estado de pagamento — só em salas a dinheiro */}
+                  {!p.is_bot && !isPractice && (
                     <span
                       className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase tracking-wider flex items-center gap-1 ${
                         p.bet_paid ? "text-emerald-300" : "text-amber-300"
@@ -571,21 +488,23 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
         {/* Actions (host) */}
         {currentRoom.host_id === user?.id && (
           <div className="flex gap-2">
-            <button
-              onClick={fillSeats}
-              disabled={currentRoom.players.length >= currentRoom.max_players}
-              className="flex-1 py-3 rounded-2xl font-bold text-sm uppercase tracking-wider transition-transform flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-              style={{
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                backdropFilter: "blur(12px)",
-                WebkitBackdropFilter: "blur(12px)",
-                color: "#fff",
-              }}
-            >
-              <UserPlus className="w-4 h-4" />
-              Preencher
-            </button>
+            {isPractice && (
+              <button
+                onClick={() => fillSeats()}
+                disabled={currentRoom.players.length >= currentRoom.max_players}
+                className="flex-1 py-3 rounded-2xl font-bold text-sm uppercase tracking-wider transition-transform flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  backdropFilter: "blur(12px)",
+                  WebkitBackdropFilter: "blur(12px)",
+                  color: "#fff",
+                }}
+              >
+                <UserPlus className="w-4 h-4" />
+                Adicionar bots
+              </button>
+            )}
             <button
               onClick={startGame}
               disabled={currentRoom.players.length < 2}
@@ -621,6 +540,21 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
   // Lobby view
   return (
     <div className="space-y-4">
+      <button
+        onClick={startPractice}
+        className="w-full rounded-2xl p-4 border border-white/10 flex items-center gap-3 text-left transition-transform hover:scale-[1.01] active:scale-95"
+        style={{
+          background: "linear-gradient(135deg, rgba(124,58,237,0.30), rgba(59,130,246,0.18))",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), 0 6px 18px rgba(0,0,0,0.35)",
+        }}
+      >
+        <Bot className="w-8 h-8 text-white/85 shrink-0" />
+        <span>
+          <span className="block font-extrabold text-foreground">Treinar contra bots</span>
+          <span className="block text-xs text-muted-foreground">Grátis · sem apostas</span>
+        </span>
+      </button>
+
       {/* Tabs — glassmorphism */}
       <div
         className="flex gap-1 rounded-2xl p-1 border border-white/10"
@@ -723,6 +657,15 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
                     <span className="text-sm font-semibold text-muted-foreground">
                       {room.players.length}/{room.max_players}
                     </span>
+                    {room.players.some((p) => p.level) && (
+                      <span className="text-[10px] font-extrabold uppercase text-white/60 ml-2">
+                        Nv.{" "}
+                        {Math.round(
+                          room.players.reduce((a, p) => a + (p.level ?? 0), 0) /
+                            room.players.filter((p) => p.level).length,
+                        )}
+                      </span>
+                    )}
                   </div>
                   <Button
                     size="sm"
@@ -867,10 +810,11 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              {Math.floor(selectedBet * 4 * 0.95).toLocaleString()} Kz
+              até {Math.floor(selectedBet * 4 * 0.95).toLocaleString()} Kz
             </p>
             <p className="text-[11px] text-muted-foreground">
-              4 jogadores × {selectedBet.toLocaleString()} Kz · 5% taxa
+              95% do pote · 2 jogadores: {Math.floor(selectedBet * 2 * 0.95).toLocaleString()} Kz ·
+              4 jogadores: {Math.floor(selectedBet * 4 * 0.95).toLocaleString()} Kz
             </p>
           </div>
 
@@ -917,6 +861,22 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
               })}
             </div>
           </div>
+
+          <button
+            onClick={quickMatch}
+            disabled={balance < selectedBet || selectedBet < MIN_BET}
+            className="w-full py-3 rounded-2xl font-extrabold uppercase tracking-wider text-white transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95"
+            style={{
+              background: "linear-gradient(135deg, rgba(124,58,237,0.75), rgba(59,130,246,0.6))",
+              boxShadow: "0 6px 20px rgba(124,58,237,0.35), inset 0 1px 0 rgba(255,255,255,0.25)",
+            }}
+          >
+            <Zap className="w-4 h-4" />
+            Jogo rápido
+          </button>
+          <p className="text-[11px] text-muted-foreground text-center -mt-2">
+            Junta-te a jogadores do teu nível com esta aposta
+          </p>
 
           <button
             onClick={createRoom}

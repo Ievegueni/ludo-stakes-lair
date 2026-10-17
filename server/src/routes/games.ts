@@ -12,6 +12,7 @@ import {
   settleGame,
   withDeadline,
 } from "../game/actions.js";
+import { bumpMission } from "../game/missions.js";
 
 const app = new Hono();
 
@@ -105,7 +106,14 @@ app.post("/start/:roomId", async (c) => {
     // Se algum tiver `bet_paid=false` (sala legacy ou bug histórico),
     // tenta fazer backfill da cobrança AGORA. Se algum não tiver saldo,
     // recusa o start com erro detalhado (o host vê quem falhou).
-    const unpaidHumans = playersRes.rows.filter((p: any) => !p.is_bot && p.user_id && !p.bet_paid);
+    const isPractice = Number(room.bet_amount) === 0;
+    if (!isPractice && playersRes.rows.some((p: any) => p.is_bot)) {
+      await client.query("ROLLBACK");
+      return c.json({ error: "bots only in practice rooms" }, 400);
+    }
+    const unpaidHumans = isPractice
+      ? []
+      : playersRes.rows.filter((p: any) => !p.is_bot && p.user_id && !p.bet_paid);
     if (unpaidHumans.length > 0) {
       console.warn(
         `[games.start] ${unpaidHumans.length} unpaid players in room ${room.code} — attempting backfill`,
@@ -326,6 +334,13 @@ app.post("/:id/move", async (c) => {
     }
     const { ns, captured, dice } = result;
     const updated = await saveState(client, id, ns);
+    if (captured) {
+      const r = await client.query<{ bet_amount: string }>(
+        "SELECT bet_amount FROM rooms WHERE id = $1",
+        [game.room_id],
+      );
+      if (Number(r.rows[0]?.bet_amount ?? 0) > 0) await bumpMission(client, u.id, "capture5");
+    }
     if (ns.winner) await settleGame(client, id, game.room_id, ns);
 
     await client.query("COMMIT");

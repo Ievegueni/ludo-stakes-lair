@@ -15,6 +15,7 @@ import {
 export function Wallet() {
   const { user } = useAuth();
   const [balance, setBalance] = useState(0);
+  const [bonus, setBonus] = useState(0);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -25,8 +26,9 @@ export function Wallet() {
 
   const refresh = async () => {
     try {
-      const [bal, txs] = await Promise.all([api.wallet.get(), api.wallet.transactions(20)]);
-      setBalance(bal);
+      const [w, txs] = await Promise.all([api.wallet.getFull(), api.wallet.transactions(20)]);
+      setBalance(w.balance);
+      setBonus(w.bonus);
       setTransactions(txs);
     } catch (err) {
       console.error(err);
@@ -59,6 +61,7 @@ export function Wallet() {
         return <ArrowUpRight className="w-4 h-4 text-destructive" />;
       case "gift":
       case "gift_received":
+      case "bonus":
         return <Gift className="w-4 h-4 text-amber-500" />;
       default:
         return <History className="w-4 h-4 text-muted-foreground" />;
@@ -81,6 +84,10 @@ export function Wallet() {
         return "Gift";
       case "gift_received":
         return "Gift recebido";
+      case "bonus":
+        return "Bónus";
+      case "purchase":
+        return "Loja";
       default:
         return type;
     }
@@ -123,6 +130,14 @@ export function Wallet() {
           {balance.toLocaleString()}{" "}
           <span className="text-lg text-emerald-200/70 font-bold">Kz</span>
         </p>
+        {bonus > 0 && (
+          <p className="relative z-10 mt-2 text-sm font-bold text-amber-200">
+            + {bonus.toLocaleString()} Kz de bónus
+            <span className="block text-[11px] font-medium text-white/60">
+              Serve para apostar e para a loja. Não pode ser levantado.
+            </span>
+          </p>
+        )}
       </div>
 
       {/* Botões de depósito glass */}
@@ -182,12 +197,14 @@ export function Wallet() {
                   </div>
                   <span
                     className={`text-sm font-extrabold ${
-                      ["deposit", "win", "refund", "gift_received"].includes(tx.type)
+                      ["deposit", "win", "refund", "gift_received", "bonus"].includes(tx.type)
                         ? "text-emerald-400"
                         : "text-rose-400"
                     }`}
                   >
-                    {["deposit", "win", "refund", "gift_received"].includes(tx.type) ? "+" : "-"}
+                    {["deposit", "win", "refund", "gift_received", "bonus"].includes(tx.type)
+                      ? "+"
+                      : "-"}
                     {tx.amount.toLocaleString()} Kz
                   </span>
                 </div>

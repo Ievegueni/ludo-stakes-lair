@@ -1,5 +1,6 @@
-import { Crown, Flag } from "lucide-react";
+import { Bot, Crown, Flag } from "lucide-react";
 import type { PlayerColor } from "@/lib/ludo-engine";
+import { FRAMES } from "@/lib/cosmetics";
 
 /**
  * Avatar reutilizável para jogadores.
@@ -26,7 +27,7 @@ const COLOR_DARK: Record<PlayerColor, string> = {
   yellow: "#854d0e",
 };
 
-export type PlayerAvatarBadge = "resigned" | "winner" | null;
+export type PlayerAvatarBadge = "resigned" | "winner" | "bot" | null;
 
 export interface PlayerAvatarProps {
   name: string;
@@ -37,6 +38,8 @@ export interface PlayerAvatarProps {
   resigned?: boolean;
   isBot?: boolean;
   isWinner?: boolean;
+  /** Moldura cosmética equipada (id de FRAMES). */
+  frame?: string | null;
   className?: string;
 }
 
@@ -49,21 +52,38 @@ export function PlayerAvatar({
   resigned = false,
   isBot = false,
   isWinner = false,
+  frame,
   className = "",
 }: PlayerAvatarProps) {
+  const frameStyle = frame ? FRAMES[frame] : undefined;
   const ring = color ? COLOR_HEX[color] : "#a1a1aa";
   const ringDark = color ? COLOR_DARK[color] : "#52525b";
   const initial = (name || "?").trim().charAt(0).toUpperCase();
-  // Os "bots" são apresentados como humanos — sem badge identificador.
-  // Apenas vencedor e desistente mostram badge.
-  void isBot; // mantido na assinatura por compat
-  const badge: PlayerAvatarBadge = isWinner ? "winner" : resigned ? "resigned" : null;
+  const badge: PlayerAvatarBadge = isWinner
+    ? "winner"
+    : resigned
+      ? "resigned"
+      : isBot
+        ? "bot"
+        : null;
 
   return (
     <div
       className={`relative inline-flex items-center justify-center ${className}`}
       style={{ width: size, height: size }}
     >
+      {frameStyle && (
+        <span
+          aria-hidden
+          className="absolute rounded-full pointer-events-none"
+          style={{
+            inset: -Math.max(3, size * 0.08),
+            background: frameStyle.ring,
+            boxShadow: `0 0 ${size * 0.25}px ${frameStyle.glow}aa`,
+          }}
+        />
+      )}
+
       {/* Glow ring quando activo */}
       {isActive && (
         <span
@@ -134,13 +154,19 @@ export function PlayerAvatar({
             right: -size * 0.04,
             bottom: -size * 0.04,
             background:
-              badge === "winner" ? "linear-gradient(135deg, #fde047, #f59e0b)" : "#dc2626",
+              badge === "winner"
+                ? "linear-gradient(135deg, #fde047, #f59e0b)"
+                : badge === "bot"
+                  ? "#6366f1"
+                  : "#dc2626",
             border: "1.5px solid #0b0817",
             boxShadow: "0 2px 6px rgba(0,0,0,0.55)",
           }}
         >
           {badge === "winner" ? (
             <Crown size={size * 0.24} color="#7c2d12" strokeWidth={2.5} />
+          ) : badge === "bot" ? (
+            <Bot size={size * 0.24} color="#fff" strokeWidth={2.5} />
           ) : (
             <Flag size={size * 0.22} color="#fff" strokeWidth={2.5} />
           )}

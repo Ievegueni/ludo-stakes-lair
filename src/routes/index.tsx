@@ -6,10 +6,20 @@ import { LudoBoard } from "@/components/LudoBoard";
 import { Lobby } from "@/components/Lobby";
 import { Wallet } from "@/components/Wallet";
 import { Profile } from "@/components/Profile";
+import { Challenges } from "@/components/Challenges";
 import { api } from "@/lib/api";
 import { createPlayer, type PlayerColor } from "@/lib/ludo-engine";
 import { Toaster, toast } from "sonner";
-import { LogOut, Wallet as WalletIcon, Gamepad2, User, Volume2, VolumeX } from "lucide-react";
+import {
+  LogOut,
+  Wallet as WalletIcon,
+  Gamepad2,
+  User,
+  Volume2,
+  VolumeX,
+  Trophy,
+  Gift,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { isMuted, setMuted } from "@/utils/sound";
@@ -46,11 +56,12 @@ interface MultiplayerInfo {
 
 function Index() {
   const { user, loading, signOut } = useAuth();
-  const [view, setView] = useState<"lobby" | "wallet" | "game" | "profile">("lobby");
+  const [view, setView] = useState<"lobby" | "wallet" | "game" | "profile" | "challenges">("lobby");
   const [gamePlayers, setGamePlayers] = useState<GamePlayer[] | null>(null);
   const [gameBetAmount, setGameBetAmount] = useState(0);
   const [multiplayer, setMultiplayer] = useState<MultiplayerInfo | null>(null);
   const [balance, setBalance] = useState(0);
+  const [bonus, setBonus] = useState(0);
   const [displayName, setDisplayName] = useState("Jogador");
   const [muted, setMutedState] = useState<boolean>(() => isMuted());
 
@@ -72,7 +83,7 @@ function Index() {
       // Tudo em paralelo — não há dependências entre estes fetches
       const [profileRes, balanceRes, activeRes] = await Promise.allSettled([
         api.profiles.me(),
-        api.wallet.get(),
+        api.wallet.getFull(),
         // Só corre o reconnect uma vez por sessão de login
         reconnectAttemptedRef.current ? Promise.resolve(null) : api.games.active(),
       ]);
@@ -83,7 +94,8 @@ function Index() {
         setDisplayName(profileRes.value.display_name);
       }
       if (balanceRes.status === "fulfilled") {
-        setBalance(balanceRes.value);
+        setBalance(balanceRes.value.balance);
+        setBonus(balanceRes.value.bonus);
       }
 
       // Reconnect — só na primeira passagem
@@ -133,8 +145,9 @@ function Index() {
 
   const loadBalance = async () => {
     try {
-      const bal = await api.wallet.get();
-      setBalance(bal);
+      const w = await api.wallet.getFull();
+      setBalance(w.balance);
+      setBonus(w.bonus);
     } catch {}
   };
 
@@ -245,6 +258,16 @@ function Index() {
                 <WalletIcon className="w-3.5 h-3.5" />
                 <span>{balance.toLocaleString()} Kz</span>
               </div>
+              {bonus > 0 && (
+                <div
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-full font-bold text-xs text-amber-950"
+                  style={{ background: "var(--grad-pot)" }}
+                  title="Saldo bónus (não levantável)"
+                >
+                  <Gift className="w-3.5 h-3.5" />
+                  {bonus.toLocaleString()}
+                </div>
+              )}
               <button
                 onClick={toggleMute}
                 className="text-muted-foreground hover:text-foreground transition-colors p-1.5 rounded-full hover:bg-white/5"
@@ -276,7 +299,7 @@ function Index() {
 
           {view === "lobby" && (
             <Lobby
-              balance={balance}
+              balance={balance + bonus}
               onBalanceRefresh={loadBalance}
               onStartGame={(players, bet, mp) => {
                 setGamePlayers(players);
@@ -290,6 +313,8 @@ function Index() {
           {view === "wallet" && <Wallet />}
 
           {view === "profile" && <Profile />}
+
+          {view === "challenges" && <Challenges onWalletChange={loadBalance} />}
         </main>
 
         {/* Bottom nav — vidro escuro */}
@@ -303,6 +328,7 @@ function Index() {
           <div className="max-w-lg mx-auto flex">
             {[
               { key: "lobby" as const, label: "Jogar", icon: Gamepad2 },
+              { key: "challenges" as const, label: "Desafios", icon: Trophy },
               { key: "wallet" as const, label: "Carteira", icon: WalletIcon },
               { key: "profile" as const, label: "Perfil", icon: User },
             ].map(({ key, label, icon: Icon }) => {

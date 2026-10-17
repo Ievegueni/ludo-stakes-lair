@@ -11,6 +11,8 @@ export interface Profile {
   display_name: string;
   avatar_url: string | null;
   created_at?: string;
+  equipped_frame?: string | null;
+  level?: number;
 }
 
 export interface Transaction {
@@ -31,6 +33,34 @@ export interface RoomPlayer {
   color: string;
   is_ready: boolean;
   bet_paid: boolean;
+  level?: number | null;
+  equipped_frame?: string | null;
+}
+
+export interface Mission {
+  id: string;
+  label: string;
+  goal: number;
+  reward: number;
+  progress: number;
+  claimed: boolean;
+}
+
+export interface RankEntry {
+  userId: string;
+  name: string;
+  frame: string | null;
+  level: number;
+  wins: number;
+  won: number;
+  rank: number;
+}
+
+export interface ShopItem {
+  id: string;
+  name: string;
+  price: number;
+  owned: boolean;
 }
 
 export interface Room {
@@ -161,6 +191,10 @@ export const api = {
       const r = await request<{ balance: number }>("/api/wallet");
       return r.balance;
     },
+    /** Saldo real + bónus (não levantável). */
+    async getFull() {
+      return request<{ balance: number; bonus: number }>("/api/wallet");
+    },
     async transactions(limit = 50) {
       const r = await request<{ transactions: Transaction[] }>(
         `/api/wallet/transactions?limit=${limit}`,
@@ -176,6 +210,49 @@ export const api = {
         body: JSON.stringify(input),
       });
       return r;
+    },
+  },
+
+  rewards: {
+    async missions() {
+      const r = await request<{ missions: Mission[] }>("/api/rewards/missions");
+      return r.missions;
+    },
+    async claim(id: string) {
+      return request<{ ok: boolean; reward: number }>(`/api/rewards/missions/${id}/claim`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    },
+    async leaderboard() {
+      return request<{
+        top: RankEntry[];
+        me: RankEntry | null;
+        prizes: number[];
+        endsAt: string;
+      }>("/api/rewards/leaderboard");
+    },
+    async shop() {
+      return request<{
+        items: ShopItem[];
+        equipped: string | null;
+        level: number;
+        xp: number;
+        balance: number;
+        bonus: number;
+      }>("/api/rewards/shop");
+    },
+    async buy(id: string) {
+      return request<{ ok: boolean }>(`/api/rewards/shop/${id}/buy`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    },
+    async equip(id: string | null) {
+      return request<{ ok: boolean }>(`/api/rewards/shop/${id ?? "none"}/equip`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
     },
   },
 
@@ -195,6 +272,11 @@ export const api = {
       const r = await request<{ room: Room }>(`/api/rooms/${id}`);
       return r.room;
     },
+    /** Jogo rápido: melhor sala em espera para o meu nível (ou null). */
+    async match(bet: number) {
+      const r = await request<{ roomId: string | null }>(`/api/rooms/match?bet=${bet}`);
+      return r.roomId;
+    },
     async byCode(code: string) {
       const r = await request<{ room: Room }>(`/api/rooms/by-code/${code}`);
       return r.room;
@@ -206,10 +288,10 @@ export const api = {
       });
       return r.room;
     },
-    async addBot(id: string, bot_name: string) {
+    async addBot(id: string) {
       const r = await request<{ room: Room }>(`/api/rooms/${id}/bots`, {
         method: "POST",
-        body: JSON.stringify({ bot_name }),
+        body: JSON.stringify({}),
       });
       return r.room;
     },

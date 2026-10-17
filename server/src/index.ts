@@ -17,6 +17,7 @@ import roomRoutes from "./routes/rooms.js";
 import gameRoutes from "./routes/games.js";
 import settingsRoutes from "./routes/settings.js";
 import reportsRoutes from "./routes/reports.js";
+import rewardsRoutes, { payWeeklyPrizes } from "./routes/rewards.js";
 
 const app = new Hono();
 
@@ -73,6 +74,7 @@ app.route("/api/rooms", roomRoutes);
 app.route("/api/games", gameRoutes);
 app.route("/api/settings", settingsRoutes);
 app.route("/api/reports", reportsRoutes);
+app.route("/api/rewards", rewardsRoutes);
 
 // Só aceita o token efémero de scope 'realtime' — antes este endpoint
 // estava completamente aberto (qualquer um via os eventos da BD).
@@ -157,6 +159,9 @@ async function main() {
   await startRealtime();
   startRoomsCleanup();
   startGameTicker();
+  // Prémios do ranking da semana anterior — idempotente, basta tentar de hora a hora
+  void payWeeklyPrizes();
+  setInterval(payWeeklyPrizes, 60 * 60 * 1000);
   // Pré-aquecimento em paralelo — não bloqueia o serve
   void Promise.all([prewarmSSR(), prewarmDb()]);
   serve({ fetch: app.fetch, port }, (info) => {

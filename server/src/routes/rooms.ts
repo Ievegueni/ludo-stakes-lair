@@ -2,21 +2,30 @@ import { Hono } from "hono";
 import { one, query, pool } from "../db.js";
 import { requireAuth } from "../auth.js";
 import { chargeBet, refundBet, InsufficientBalanceError } from "../lib/wallet.js";
+import { levelFromXp } from "../game/missions.js";
 
 const app = new Hono();
 
 app.use("*", requireAuth);
 
 const COLORS = ["red", "blue", "green", "yellow"] as const;
+const BOT_NAMES = ["Kiala", "Nzinga", "Mbala", "Lueji"] as const;
+
+/** Jogadores das salas, com o nível dos humanos (para o matchmaking/UI). */
+async function playersOf(roomIds: string[]) {
+  const rows = await query<any>(
+    `SELECT rp.*, p.xp, p.equipped_frame FROM room_players rp
+     LEFT JOIN profiles p ON p.id = rp.user_id
+     WHERE rp.room_id = ANY($1::uuid[]) ORDER BY rp.player_index`,
+    [roomIds],
+  );
+  return rows.map(({ xp, ...p }) => ({ ...p, level: p.is_bot ? null : levelFromXp(xp ?? 0) }));
+}
 
 async function loadRoomWithPlayers(id: string) {
   const room = await one<any>("SELECT * FROM rooms WHERE id = $1", [id]);
   if (!room) return null;
-  const players = await query<any>(
-    "SELECT * FROM room_players WHERE room_id = $1 ORDER BY player_index",
-    [id],
-  );
-  return { ...room, players };
+  return { ...room, players: await playersOf([id]) };
 }
 
 // Listagem pública — exclui salas privadas (só acessíveis por código)
@@ -27,11 +36,7 @@ app.get("/", async (c) => {
     [status],
   );
   if (rooms.length === 0) return c.json({ rooms: [] });
-  const ids = rooms.map((r: any) => r.id);
-  const players = await query<any>(
-    "SELECT * FROM room_players WHERE room_id = ANY($1::uuid[]) ORDER BY player_index",
-    [ids],
-  );
+  const players = await playersOf(rooms.map((r: any) => r.id));
   const byRoom: Record<string, any[]> = {};
   for (const p of players) {
     (byRoom[p.room_id] ||= []).push(p);
@@ -46,9 +51,11 @@ app.post("/", async (c) => {
   const u = c.get("user");
   const body = await c.req.json<{ bet_amount?: number; is_private?: boolean }>();
   const bet = Math.floor(Number(body.bet_amount));
-  const isPrivate = !!body.is_private;
+  // bet 0 = sala de treino (contra bots, sem dinheiro); nunca listada
+  const isPractice = bet === 0;
+  const isPrivate = isPractice || !!body.is_private;
   // Mesmo mínimo do Lobby (MIN_BET); máximo igual ao limite por transacção
-  if (!Number.isFinite(bet) || bet < 500 || bet > 10_000_000) {
+  if (!Number.isFinite(bet) || (!isPractice && (bet < 500 || bet > 10_000_000))) {
     return c.json({ error: "bad bet_amount" }, 400);
   }
 
@@ -65,7 +72,7 @@ app.post("/", async (c) => {
       [room.id, u.id, "red"],
     );
     try {
-      await chargeBet(client, u.id, room.id, bet, `Aposta na sala ${room.code}`);
+      if (!isPractice) await chargeBet(client, u.id, room.id, bet, `Aposta na sala ${room.code}`);
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof InsufficientBalanceError) {
@@ -87,6 +94,28 @@ app.post("/", async (c) => {
   } finally {
     client.release();
   }
+});
+
+// Jogo rápido: a sala pública em espera com a mesma aposta cujos jogadores
+// têm o nível mais próximo do meu. O cliente entra com /join (ou cria uma
+// sala se não houver nenhuma).
+app.get("/match", async (c) => {
+  const u = c.get("user");
+  const bet = Math.floor(Number(c.req.query("bet")));
+  if (!Number.isFinite(bet) || bet < 500) return c.json({ error: "bad bet" }, 400);
+  const me = await one<{ xp: number }>("SELECT xp FROM profiles WHERE id = $1", [u.id]);
+  const room = await one<{ id: string }>(
+    `SELECT r.id FROM rooms r
+     JOIN room_players rp ON rp.room_id = r.id
+     LEFT JOIN profiles p ON p.id = rp.user_id
+     WHERE r.status = 'waiting' AND r.is_private = false AND r.bet_amount = $1
+     GROUP BY r.id
+     HAVING count(*) < max(r.max_players) AND bool_and(rp.user_id IS DISTINCT FROM $2)
+     ORDER BY abs(sqrt(coalesce(avg(p.xp), 0)) - sqrt($3::float)), min(r.created_at)
+     LIMIT 1`,
+    [bet, u.id, me?.xp ?? 0],
+  );
+  return c.json({ roomId: room?.id ?? null });
 });
 
 app.get("/by-code/:code", async (c) => {
@@ -151,7 +180,9 @@ app.post("/:id/join", async (c) => {
       [id, u.id, idx, color],
     );
     try {
-      await chargeBet(client, u.id, id, Number(room.bet_amount), `Aposta na sala ${room.code}`);
+      if (Number(room.bet_amount) > 0) {
+        await chargeBet(client, u.id, id, Number(room.bet_amount), `Aposta na sala ${room.code}`);
+      }
     } catch (err) {
       await client.query("ROLLBACK");
       if (err instanceof InsufficientBalanceError) {
@@ -175,14 +206,15 @@ app.post("/:id/join", async (c) => {
   }
 });
 
-// Adicionar bot — bots NÃO pagam aposta
+// Adicionar bot — só em salas de treino (bet 0). Em salas a dinheiro os
+// adversários são sempre humanos que pagaram a aposta.
 app.post("/:id/bots", async (c) => {
   const u = c.get("user");
   const id = c.req.param("id");
-  const body = await c.req.json<{ bot_name?: string }>();
   const full = await loadRoomWithPlayers(id);
   if (!full) return c.json({ error: "not found" }, 404);
   if (full.host_id !== u.id) return c.json({ error: "forbidden" }, 403);
+  if (Number(full.bet_amount) > 0) return c.json({ error: "bots only in practice rooms" }, 400);
   if (full.status !== "waiting") return c.json({ error: "room not joinable" }, 400);
   if (full.players.length >= full.max_players) {
     return c.json({ error: "room full" }, 400);
@@ -196,7 +228,7 @@ app.post("/:id/bots", async (c) => {
   }
   await query(
     "INSERT INTO room_players (room_id, user_id, player_index, color, is_bot, bot_name, is_ready) VALUES ($1, NULL, $2, $3, true, $4, true)",
-    [id, idx, color, body.bot_name || "Bot"],
+    [id, idx, color, `Bot ${BOT_NAMES[idx]}`],
   );
   const updated = await loadRoomWithPlayers(id);
   return c.json({ room: updated });
@@ -248,6 +280,7 @@ app.post("/:id/leave", async (c) => {
         await refundBet(
           client,
           u.id,
+          id,
           Number(room.bet_amount),
           `Reembolso (saiu da sala ${room.code} antes do jogo iniciar)`,
         );
