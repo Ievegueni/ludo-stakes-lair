@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { Loader2, UserPlus, LogIn, Phone } from "lucide-react";
+import { LegalModal, type LegalDoc } from "@/components/Legal";
 
 const normalizePhone = (raw: string) => raw.replace(/\D/g, "");
 
@@ -13,6 +14,7 @@ export function AuthPhone() {
 
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [loading, setLoading] = useState(false);
+  const [legal, setLegal] = useState<LegalDoc | null>(null);
 
   const handleSubmit = async () => {
     const cleanPhone = normalizePhone(phone);
@@ -123,9 +125,26 @@ export function AuthPhone() {
         </div>
 
         <p className="text-center text-xs text-muted-foreground">
-          Ao entrar, aceitas os termos de uso e política de privacidade.
+          Ao entrar, confirmas que tens 18 anos ou mais e aceitas os{" "}
+          <button
+            type="button"
+            onClick={() => setLegal("terms")}
+            className="text-foreground/80 underline-offset-2 hover:text-foreground hover:underline cursor-pointer transition-colors"
+          >
+            termos de uso
+          </button>{" "}
+          e a{" "}
+          <button
+            type="button"
+            onClick={() => setLegal("privacy")}
+            className="text-foreground/80 underline-offset-2 hover:text-foreground hover:underline cursor-pointer transition-colors"
+          >
+            política de privacidade
+          </button>
+          .
         </p>
       </div>
+      <LegalModal doc={legal} onClose={() => setLegal(null)} />
     </div>
   );
 }
