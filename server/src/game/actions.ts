@@ -13,6 +13,7 @@ import {
 } from "./engine.js";
 import { smartRollDice, loadSmartDiceConfig } from "./smart-dice.js";
 import { bumpMission, XP_PER_GAME, XP_PER_WIN } from "./missions.js";
+import { prizeFor } from "./config.js";
 
 export const HUMAN_ROLL_SECONDS = 15;
 export const HUMAN_MOVE_SECONDS = 30;
@@ -108,7 +109,7 @@ export async function saveState(client: PoolClient, gameId: string, ns: GameStat
 }
 
 /**
- * Liquida um jogo terminado: credita o prémio (pot × 0.95) ao vencedor
+ * Liquida um jogo terminado: credita o prémio (pot menos a taxa da sala) ao vencedor
  * humano e marca o jogo/sala como finalizados. A parte do pote paga com
  * bónus é paga em bónus. Conta missões e XP nos jogos a dinheiro.
  * Idempotente via flag `settled` (o caller deve garantir FOR UPDATE na
@@ -120,11 +121,12 @@ export async function settleGame(
   roomId: string,
   state: GameState,
 ): Promise<void> {
-  const roomRes = await client.query<{ bet_amount: string }>(
-    "SELECT bet_amount FROM rooms WHERE id = $1",
+  const roomRes = await client.query<{ bet_amount: string; rake_pct: string }>(
+    "SELECT bet_amount, rake_pct FROM rooms WHERE id = $1",
     [roomId],
   );
   const betAmount = Number(roomRes.rows[0]?.bet_amount ?? 0);
+  const rakePct = Number(roomRes.rows[0]?.rake_pct ?? 5);
   const paidRes = await client.query<{ user_id: string; bet_bonus: string }>(
     `SELECT user_id, bet_bonus FROM room_players
      WHERE room_id = $1 AND bet_paid = true AND user_id IS NOT NULL`,
@@ -133,8 +135,8 @@ export async function settleGame(
   const paidUserIds = paidRes.rows.map((r) => r.user_id);
   const pot = betAmount * paidUserIds.length;
   const bonusPot = paidRes.rows.reduce((sum, r) => sum + Number(r.bet_bonus), 0);
-  const prize = Math.floor(pot * 0.95);
-  const bonusPrize = Math.floor(bonusPot * 0.95);
+  const prize = prizeFor(pot, rakePct);
+  const bonusPrize = prizeFor(bonusPot, rakePct);
   const realPrize = prize - bonusPrize;
 
   const winnerId = state.winner!;

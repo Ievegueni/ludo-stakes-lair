@@ -63,6 +63,9 @@ const PIECE_PREFIX: Record<PlayerColor, string> = {
   yellow: "Y",
 };
 
+// Tempo para ver o resultado do dado quando a vez passa logo (≈ assentamento do <Dice>)
+const DICE_RESULT_HOLD_MS = 1600;
+
 const BOARD_PATH = generateBoardPath();
 const HOME_STRETCH = generateHomeStretch();
 
@@ -123,6 +126,9 @@ export function LudoBoard({
   );
 
   const [animatingDice, setAnimatingDice] = useState(false);
+  // Enquanto o resultado do meu dado está à mostra, estados novos esperam aqui
+  const holdUntilRef = useRef(0);
+  const heldStateRef = useRef<GameState | null>(null);
   const [showChat, setShowChat] = useState(false);
   const [showEmojiBar, setShowEmojiBar] = useState(false);
   const [showResignConfirm, setShowResignConfirm] = useState(false);
@@ -395,6 +401,10 @@ export function LudoBoard({
       if (incomingVersion <= versionRef.current) return;
       versionRef.current = incomingVersion;
       lastPushedRef.current = JSON.stringify(incomingState);
+      if (Date.now() < holdUntilRef.current) {
+        heldStateRef.current = incomingState;
+        return;
+      }
       setGameState(incomingState);
     };
     const off = api.realtime.subscribe((ev) => {
@@ -505,17 +515,11 @@ export function LudoBoard({
       actionPendingRef.current = true;
       localSoundRef.current = true;
       playSound("dice-roll");
+      // O <Dice> roda sozinho enquanto isRolling; mudar o valor aqui
+      // reiniciava a animação a cada frame e o dado girava frenético.
       setAnimatingDice(true);
       const startedAt = Date.now();
-      const animInterval = setInterval(() => {
-        setGameState((prev) =>
-          prev.phase === "rolling" ? { ...prev, diceValue: rollDice() } : prev,
-        );
-      }, 100);
-      const stopAnim = () => {
-        clearInterval(animInterval);
-        setAnimatingDice(false);
-      };
+      const stopAnim = () => setAnimatingDice(false);
 
       api.games
         .roll(multiplayer.gameId)
@@ -525,13 +529,28 @@ export function LudoBoard({
           lastPushedRef.current = JSON.stringify(r.game.state);
           const reveal = () => {
             stopAnim();
-            setGameState(r.game.state as GameState);
             addLog(
               cur.color,
               `${cur.name} lançou um ${r.dice}${r.dice === 6 ? "!" : ""}`,
               r.dice === 6,
             );
-            actionPendingRef.current = false;
+            const serverState = r.game.state as GameState;
+            if (serverState.currentPlayerIndex === gameState.currentPlayerIndex) {
+              setGameState(serverState);
+              actionPendingRef.current = false;
+              return;
+            }
+            // Sem jogadas: o servidor já passou a vez. Mostra o resultado no
+            // meu canto antes de avançar (o realtime fica em espera até lá).
+            setGameState((prev) => ({ ...prev, diceValue: r.dice }));
+            holdUntilRef.current = Date.now() + DICE_RESULT_HOLD_MS;
+            heldStateRef.current = serverState;
+            setTimeout(() => {
+              holdUntilRef.current = 0;
+              if (heldStateRef.current) setGameState(heldStateRef.current);
+              heldStateRef.current = null;
+              actionPendingRef.current = false;
+            }, DICE_RESULT_HOLD_MS);
           };
           // Animação mínima de ~900ms para o dado "rolar" de forma credível
           setTimeout(reveal, Math.max(0, 900 - (Date.now() - startedAt)));
@@ -2154,6 +2173,7 @@ export function LudoBoard({
             winnerColor={winnerPlayer?.color}
             winnerId={gameState.winner}
             pot={betAmount > 0 ? potTotal : undefined}
+            rakePct={gameState.rakePct ?? 5}
             betAmount={betAmount}
             players={gameState.players}
             myUserId={myUserId}

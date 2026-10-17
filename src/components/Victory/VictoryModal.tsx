@@ -24,6 +24,8 @@ interface VictoryModalProps {
   players?: Player[];
   myUserId?: string;
   isMe?: boolean;
+  /** Taxa da casa (%) da sala. */
+  rakePct?: number;
   onClose: () => void;
 }
 
@@ -57,6 +59,7 @@ export function VictoryModal({
   players = [],
   myUserId,
   isMe,
+  rakePct = 5,
   onClose,
 }: VictoryModalProps) {
   const [count, setCount] = useState(0);
@@ -85,7 +88,7 @@ export function VictoryModal({
       setCount(0);
       return;
     }
-    const target = pot && pot > 0 ? Math.floor(pot * 0.95) : 0;
+    const target = pot && pot > 0 ? Math.floor((pot * (100 - rakePct)) / 100) : 0;
     if (target === 0) return;
     const duration = 1400;
     const start = performance.now();
@@ -98,7 +101,7 @@ export function VictoryModal({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [open, pot]);
+  }, [open, pot, rakePct]);
 
   return (
     <AnimatePresence>
@@ -201,7 +204,7 @@ export function VictoryModal({
                       label = "—";
                       color = "text-muted-foreground";
                     } else if (isWinner) {
-                      delta = pot ? Math.floor(pot * 0.95) : 0;
+                      delta = pot ? Math.floor((pot * (100 - rakePct)) / 100) : 0;
                       label = `+${delta.toLocaleString()} Kz`;
                       color = "text-emerald-400";
                     } else {
@@ -249,7 +252,7 @@ export function VictoryModal({
                 </ul>
                 <div className="mt-2 pt-2 border-t border-white/5 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
                   <span>Pot total: {pot?.toLocaleString() ?? 0} Kz</span>
-                  <span>Rake 5%</span>
+                  <span>Taxa {rakePct}%</span>
                 </div>
               </div>
             )}
@@ -257,7 +260,7 @@ export function VictoryModal({
             {isMe && (
               <button
                 onClick={async () => {
-                  const won = pot && pot > 0 ? Math.floor(pot * 0.95) : 0;
+                  const won = pot && pot > 0 ? Math.floor((pot * (100 - rakePct)) / 100) : 0;
                   const text = won
                     ? `Ganhei ${won.toLocaleString()} Kz no NANTER Ludo! 🎲👑 Achas que me ganhas?`
                     : "Ganhei uma partida no NANTER Ludo! 🎲👑 Achas que me ganhas?";

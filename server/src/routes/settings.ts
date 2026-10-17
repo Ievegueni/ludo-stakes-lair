@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { one } from "../db.js";
+import { loadGameConfig } from "../game/config.js";
 
 /**
  * Endpoint público que devolve a configuração actual do Smart Dice
@@ -24,17 +25,11 @@ const DEFAULT_SMART_DICE = {
     maxRange: 4,
   },
   comeback: { enabled: true, maxBoostPercent: 10 },
-  botBias: {
-    enabled: false,
-    scope: "bot-games-only",
-    targetRTP: 1.0,
-  },
 };
 
 const settingsRoutes = new Hono();
 
-// O botBias (house edge / targetRTP) NUNCA sai para o cliente — é segredo
-// da casa e só é aplicado nos lançamentos server-side.
+// Configs antigas na BD podem ainda ter `botBias` (já sem efeito) — não sai.
 function publicConfig(config: Record<string, unknown>) {
   const { botBias: _botBias, ...rest } = config;
   return rest;
@@ -57,6 +52,13 @@ settingsRoutes.get("/smart-dice", async (c) => {
     c.header("Cache-Control", "public, max-age=15");
     return c.json({ config: publicConfig(DEFAULT_SMART_DICE) });
   }
+});
+
+// Limites, taxa e manutenção — o lobby mostra-os ao jogador.
+settingsRoutes.get("/game", async (c) => {
+  const cfg = await loadGameConfig();
+  c.header("Cache-Control", "public, max-age=15");
+  return c.json({ config: cfg });
 });
 
 export default settingsRoutes;

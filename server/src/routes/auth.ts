@@ -98,10 +98,19 @@ app.post("/signin", async (c) => {
     phone: string;
     password_hash: string;
     token_version: number;
-  }>("SELECT id, phone, password_hash, token_version FROM users WHERE phone = $1", [phone]);
+    suspended_at: Date | null;
+    suspended_reason: string | null;
+  }>(
+    "SELECT id, phone, password_hash, token_version, suspended_at, suspended_reason FROM users WHERE phone = $1",
+    [phone],
+  );
   if (!user) return c.json({ error: "invalid credentials" }, 401);
   const ok = await verifyPassword(password, user.password_hash);
   if (!ok) return c.json({ error: "invalid credentials" }, 401);
+  // Só depois da senha: não revela a quem não a sabe que a conta existe
+  if (user.suspended_at) {
+    return c.json({ error: "account suspended", reason: user.suspended_reason }, 403);
+  }
   clearAttempts(`phone:${phone}`);
   await query("UPDATE users SET last_login_at = now() WHERE id = $1", [user.id]);
   const token = signToken({ id: user.id, phone: user.phone, tokenVersion: user.token_version });

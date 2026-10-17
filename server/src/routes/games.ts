@@ -172,7 +172,7 @@ app.post("/start/:roomId", async (c) => {
       isBot: p.is_bot,
     }));
 
-    const initialState = buildInitialState(gamePlayers);
+    const initialState = { ...buildInitialState(gamePlayers), rakePct: Number(room.rake_pct) };
 
     const gameRes = await client.query<any>(
       `INSERT INTO games (room_id, host_id, state, version) VALUES ($1, $2, $3::jsonb, 1) RETURNING *`,

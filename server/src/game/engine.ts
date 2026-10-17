@@ -38,6 +38,8 @@ export interface GameState {
   turnDeadline?: number | null;
   /** Humanos em auto-play — o servidor joga por eles. */
   autoPlay?: string[];
+  /** Taxa da casa (%) fixada na criação da sala. */
+  rakePct?: number;
 }
 
 export const START_POSITIONS: Record<PlayerColor, number> = {

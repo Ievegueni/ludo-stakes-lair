@@ -52,8 +52,9 @@ function Terms() {
             aposta. Não há bots nestas salas.
           </li>
           <li>
-            O pote é a soma das apostas dos jogadores. O vencedor recebe 95% do pote; os outros 5%
-            são a taxa do NANTER.
+            O pote é a soma das apostas dos jogadores. O vencedor recebe o pote menos a taxa do
+            NANTER, que é mostrada antes de criares ou entrares numa sala e fica fixa para essa
+            sala.
           </li>
           <li>
             Se saíres da sala antes de o jogo começar, a aposta é reembolsada. Depois de o jogo

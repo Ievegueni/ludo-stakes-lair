@@ -32,6 +32,8 @@ export interface GameState {
   turnDeadline?: number | null;
   /** Multiplayer: humanos em auto-play — o servidor joga por eles. */
   autoPlay?: string[];
+  /** Taxa da casa (%) fixada na criação da sala. */
+  rakePct?: number;
 }
 
 // Starting positions for each color on the 52-cell main track

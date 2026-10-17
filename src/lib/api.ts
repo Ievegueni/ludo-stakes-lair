@@ -37,6 +37,14 @@ export interface RoomPlayer {
   equipped_frame?: string | null;
 }
 
+export interface GameConfig {
+  minStake: number;
+  maxStake: number;
+  rakePct: number;
+  maintenance: boolean;
+  maintenanceMessage: string | null;
+}
+
 export interface Mission {
   id: string;
   label: string;
@@ -71,6 +79,8 @@ export interface Room {
   max_players: number;
   status: "waiting" | "playing" | "finished";
   is_private: boolean;
+  /** Taxa da casa (%) fixada na criação; o Postgres devolve NUMERIC como string. */
+  rake_pct?: number | string;
   created_at: string;
   players: RoomPlayer[];
 }
@@ -385,6 +395,11 @@ export const api = {
   },
 
   settings: {
+    /** Limites de aposta, taxa e manutenção (geridos no backoffice). */
+    async game() {
+      const r = await request<{ config: GameConfig }>("/api/settings/game");
+      return r.config;
+    },
     /**
      * Configuração actual do Smart Dice — gerida pelo admin no backoffice.
      * Endpoint público (sem auth) com cache do lado do servidor.

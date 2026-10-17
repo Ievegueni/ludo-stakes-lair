@@ -2,6 +2,11 @@ import pg from "pg";
 
 const { Pool } = pg;
 
+// BIGINT (valores em Kz, count(*)) e NUMERIC (taxa) chegavam como strings e
+// comparações como `bet_amount === 0` falhavam no cliente. Kz cabe em Number.
+pg.types.setTypeParser(pg.types.builtins.INT8, Number);
+pg.types.setTypeParser(pg.types.builtins.NUMERIC, Number);
+
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL || "postgres://nanter:nanter@127.0.0.1:54322/nanter",
   max: 10,

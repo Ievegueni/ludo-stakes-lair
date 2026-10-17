@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { api, type Room, type RoomPlayer } from "@/lib/api";
+import { api, type GameConfig, type Room, type RoomPlayer } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,8 +29,14 @@ const COLOR_LABELS: Record<PlayerColor, string> = {
   yellow: "Amarelo",
 };
 
-const BET_AMOUNTS = [500, 1000, 5000];
-const MIN_BET = 500;
+const BET_PRESETS = [500, 1000, 5000];
+const DEFAULT_CONFIG: GameConfig = {
+  minStake: 500,
+  maxStake: 10_000_000,
+  rakePct: 5,
+  maintenance: false,
+  maintenanceMessage: null,
+};
 
 interface LobbyProps {
   onStartGame: (
@@ -54,6 +60,20 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
   const [isPrivate, setIsPrivate] = useState(false);
   const [playerNames, setPlayerNames] = useState<Record<string, string>>({});
   const [hasStarted, setHasStarted] = useState(false);
+  const [cfg, setCfg] = useState<GameConfig>(DEFAULT_CONFIG);
+  useEffect(() => {
+    api.settings
+      .game()
+      .then(setCfg)
+      .catch(() => {});
+  }, []);
+  const MIN_BET = cfg.minStake;
+  const inRange = BET_PRESETS.filter((b) => b >= cfg.minStake && b <= cfg.maxStake);
+  const BET_AMOUNTS = inRange.length > 0 ? inRange : [cfg.minStake];
+  const prizeFor = (pot: number) => Math.floor((pot * (100 - cfg.rakePct)) / 100);
+  const betOutOfRange = selectedBet < cfg.minStake || selectedBet > cfg.maxStake;
+  const serverMsg = (err: unknown, fallback: string) =>
+    ((err as { data?: { message?: string } })?.data?.message ?? fallback) as string;
 
   const loadRooms = useCallback(async () => {
     try {
@@ -107,8 +127,10 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
 
   const createRoom = async () => {
     if (!user) return;
-    if (selectedBet < MIN_BET) {
-      toast.error(`Aposta mínima: ${MIN_BET.toLocaleString()} Kz`);
+    if (betOutOfRange) {
+      toast.error(
+        `Aposta entre ${cfg.minStake.toLocaleString()} e ${cfg.maxStake.toLocaleString()} Kz`,
+      );
       return;
     }
     if (balance < selectedBet) {
@@ -126,7 +148,9 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
       );
     } catch (err: any) {
       const msg = err?.message || "";
-      toast.error(msg.includes("insufficient") ? "Saldo insuficiente!" : "Erro ao criar sala");
+      toast.error(
+        msg.includes("insufficient") ? "Saldo insuficiente!" : serverMsg(err, "Erro ao criar sala"),
+      );
     }
   };
 
@@ -152,7 +176,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
             : "Saldo insuficiente para esta aposta",
         );
       } else {
-        toast.error(msg || "Erro ao entrar na sala");
+        toast.error(serverMsg(err, msg || "Erro ao entrar na sala"));
       }
       return false;
     }
@@ -393,6 +417,11 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
             >
               {isPractice ? "Treino" : `${currentRoom.bet_amount.toLocaleString()} Kz`}
             </p>
+            {!isPractice && (
+              <p className="text-[10px] text-muted-foreground font-bold">
+                Taxa {Number(currentRoom.rake_pct ?? 5)}%
+              </p>
+            )}
           </div>
         </div>
 
@@ -555,6 +584,12 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
         </span>
       </button>
 
+      {cfg.maintenance && (
+        <div className="rounded-2xl p-4 border border-amber-500/40 bg-amber-500/10 text-sm font-bold text-amber-200">
+          🛠️ {cfg.maintenanceMessage || "O NANTER está em manutenção. Volta daqui a pouco."}
+        </div>
+      )}
+
       {/* Tabs — glassmorphism */}
       <div
         className="flex gap-1 rounded-2xl p-1 border border-white/10"
@@ -650,6 +685,13 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
                   >
                     {room.bet_amount.toLocaleString()} Kz
                   </span>
+                </div>
+                <div className="text-[10px] text-muted-foreground font-bold -mt-1 mb-2">
+                  Taxa {Number(room.rake_pct ?? 5)}% · prémio{" "}
+                  {Math.floor(
+                    (room.bet_amount * room.max_players * (100 - Number(room.rake_pct ?? 5))) / 100,
+                  ).toLocaleString()}{" "}
+                  Kz com a sala cheia
                 </div>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
@@ -810,11 +852,12 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
                 WebkitTextFillColor: "transparent",
               }}
             >
-              até {Math.floor(selectedBet * 4 * 0.95).toLocaleString()} Kz
+              até {prizeFor(selectedBet * 4).toLocaleString()} Kz
             </p>
             <p className="text-[11px] text-muted-foreground">
-              95% do pote · 2 jogadores: {Math.floor(selectedBet * 2 * 0.95).toLocaleString()} Kz ·
-              4 jogadores: {Math.floor(selectedBet * 4 * 0.95).toLocaleString()} Kz
+              {100 - cfg.rakePct}% do pote · 2 jogadores:{" "}
+              {prizeFor(selectedBet * 2).toLocaleString()} Kz · 4 jogadores:{" "}
+              {prizeFor(selectedBet * 4).toLocaleString()} Kz
             </p>
           </div>
 
@@ -864,7 +907,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
 
           <button
             onClick={quickMatch}
-            disabled={balance < selectedBet || selectedBet < MIN_BET}
+            disabled={balance < selectedBet || betOutOfRange || cfg.maintenance}
             className="w-full py-3 rounded-2xl font-extrabold uppercase tracking-wider text-white transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95"
             style={{
               background: "linear-gradient(135deg, rgba(124,58,237,0.75), rgba(59,130,246,0.6))",
@@ -880,7 +923,7 @@ export function Lobby({ onStartGame, balance, onBalanceRefresh }: LobbyProps) {
 
           <button
             onClick={createRoom}
-            disabled={balance < selectedBet || selectedBet < MIN_BET}
+            disabled={balance < selectedBet || betOutOfRange || cfg.maintenance}
             className="w-full py-3 rounded-2xl font-extrabold uppercase tracking-wider text-amber-950 transition-transform disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95"
             style={{
               background: "var(--grad-roll-btn)",

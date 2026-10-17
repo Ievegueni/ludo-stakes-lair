@@ -74,12 +74,15 @@ export async function requireAuth(c: Context, next: Next) {
   if (!token) return c.json({ error: "unauthorized" }, 401);
   const user = verifyToken(token);
   if (!user) return c.json({ error: "invalid token" }, 401);
-  const dbUser = await one<{ id: string; phone: string; token_version: number }>(
-    "SELECT id, phone, token_version FROM users WHERE id = $1",
-    [user.id],
-  );
+  const dbUser = await one<{
+    id: string;
+    phone: string;
+    token_version: number;
+    suspended_at: Date | null;
+  }>("SELECT id, phone, token_version, suspended_at FROM users WHERE id = $1", [user.id]);
   if (!dbUser) return c.json({ error: "user not found" }, 401);
   if (dbUser.token_version !== user.tokenVersion) return c.json({ error: "invalid token" }, 401);
+  if (dbUser.suspended_at) return c.json({ error: "account suspended" }, 401);
   c.set("user", { id: dbUser.id, phone: dbUser.phone, tokenVersion: dbUser.token_version });
   await next();
 }

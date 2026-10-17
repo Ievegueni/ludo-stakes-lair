@@ -3,10 +3,16 @@ import { one, query, pool } from "../db.js";
 import { requireAuth } from "../auth.js";
 import { chargeBet, refundBet, InsufficientBalanceError } from "../lib/wallet.js";
 import { levelFromXp } from "../game/missions.js";
+import { loadGameConfig } from "../game/config.js";
 
 const app = new Hono();
 
 app.use("*", requireAuth);
+
+const maintenanceError = (msg: string | null) => ({
+  error: "maintenance",
+  message: msg || "O NANTER está em manutenção. Volta daqui a pouco.",
+});
 
 const COLORS = ["red", "blue", "green", "yellow"] as const;
 const BOT_NAMES = ["Kiala", "Nzinga", "Mbala", "Lueji"] as const;
@@ -54,17 +60,18 @@ app.post("/", async (c) => {
   // bet 0 = sala de treino (contra bots, sem dinheiro); nunca listada
   const isPractice = bet === 0;
   const isPrivate = isPractice || !!body.is_private;
-  // Mesmo mínimo do Lobby (MIN_BET); máximo igual ao limite por transacção
-  if (!Number.isFinite(bet) || (!isPractice && (bet < 500 || bet > 10_000_000))) {
-    return c.json({ error: "bad bet_amount" }, 400);
+  const cfg = await loadGameConfig();
+  if (cfg.maintenance) return c.json(maintenanceError(cfg.maintenanceMessage), 503);
+  if (!Number.isFinite(bet) || (!isPractice && (bet < cfg.minStake || bet > cfg.maxStake))) {
+    return c.json({ error: "bad bet_amount", minStake: cfg.minStake, maxStake: cfg.maxStake }, 400);
   }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const roomRes = await client.query<any>(
-      "INSERT INTO rooms (host_id, bet_amount, is_private) VALUES ($1, $2, $3) RETURNING *",
-      [u.id, bet, isPrivate],
+      "INSERT INTO rooms (host_id, bet_amount, is_private, rake_pct) VALUES ($1, $2, $3, $4) RETURNING *",
+      [u.id, bet, isPrivate, cfg.rakePct],
     );
     const room = roomRes.rows[0];
     await client.query(
@@ -102,7 +109,7 @@ app.post("/", async (c) => {
 app.get("/match", async (c) => {
   const u = c.get("user");
   const bet = Math.floor(Number(c.req.query("bet")));
-  if (!Number.isFinite(bet) || bet < 500) return c.json({ error: "bad bet" }, 400);
+  if (!Number.isFinite(bet) || bet <= 0) return c.json({ error: "bad bet" }, 400);
   const me = await one<{ xp: number }>("SELECT xp FROM profiles WHERE id = $1", [u.id]);
   const room = await one<{ id: string }>(
     `SELECT r.id FROM rooms r
@@ -139,6 +146,8 @@ app.get("/:id", async (c) => {
 app.post("/:id/join", async (c) => {
   const u = c.get("user");
   const id = c.req.param("id");
+  const cfg = await loadGameConfig();
+  if (cfg.maintenance) return c.json(maintenanceError(cfg.maintenanceMessage), 503);
 
   const client = await pool.connect();
   try {

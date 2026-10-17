@@ -44,6 +44,11 @@ export function AuthPhone() {
       const msg = err?.message || "Erro";
       if (msg.includes("invalid credentials")) {
         toast.error("Telemóvel ou senha incorrectos");
+      } else if (msg.includes("account suspended")) {
+        const reason = err?.data?.reason;
+        toast.error(`Conta suspensa${reason ? `: ${reason}` : ""}. Contacta geral@futurix.ao.`, {
+          duration: 8000,
+        });
       } else if (msg.includes("already registered")) {
         toast.error("Telemóvel já registado");
       } else {

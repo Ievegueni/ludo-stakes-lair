@@ -5,8 +5,8 @@
  *  - a config é lida da BD (backoffice) com cache curto, nunca exposta ao cliente;
  *  - a history de mercy é keyed por gameId explícito (multi-jogo em simultâneo).
  *
- * Como corre no servidor, o botBias/targetRTP é real: o jogador não consegue
- * inspeccionar nem manipular os pesos.
+ * Os pesos aplicam-se da mesma forma a todos os jogadores; não há nenhum
+ * ajuste a favor da casa.
  */
 
 import { randomInt } from "node:crypto";
@@ -31,11 +31,6 @@ export interface SmartDiceConfig {
     maxBoostPercent: number;
   };
   manipulationRate: number;
-  botBias?: {
-    enabled: boolean;
-    scope: "bot-games-only" | "all-games";
-    targetRTP: number;
-  };
 }
 
 export const DEFAULT_CONFIG: SmartDiceConfig = {
@@ -44,7 +39,6 @@ export const DEFAULT_CONFIG: SmartDiceConfig = {
   clutch: { enabled: true, captureBoostPercent: 14, finishBoostPercent: 12, maxRange: 5 },
   comeback: { enabled: true, maxBoostPercent: 12 },
   manipulationRate: 0.5,
-  botBias: { enabled: false, scope: "bot-games-only", targetRTP: 1.0 },
 };
 
 // --- Config da BD com cache de 15s (mesma tabela que o backoffice gere) ---
@@ -69,7 +63,6 @@ export async function loadSmartDiceConfig(): Promise<SmartDiceConfig> {
         mercy: { ...DEFAULT_CONFIG.mercy, ...cfg.mercy },
         clutch: { ...DEFAULT_CONFIG.clutch, ...cfg.clutch },
         comeback: { ...DEFAULT_CONFIG.comeback, ...cfg.comeback },
-        botBias: { ...DEFAULT_CONFIG.botBias!, ...cfg.botBias },
       };
     } else {
       cachedConfig = DEFAULT_CONFIG;
@@ -182,49 +175,6 @@ function pureRoll(): number {
   return randomInt(1, 7);
 }
 
-function applyBotBias(
-  weights: number[],
-  state: GameState,
-  playerIndex: number,
-  config: SmartDiceConfig,
-): void {
-  const bias = config.botBias;
-  if (!bias || !bias.enabled) return;
-  if (bias.targetRTP >= 1) return;
-
-  const players = state.players;
-  const hasBots = players.some((p) => p.isBot);
-  const hasHumans = players.some((p) => !p.isBot && !p.resigned);
-  if (bias.scope === "bot-games-only" && !(hasBots && hasHumans)) return;
-
-  const houseEdge = Math.max(0, Math.min(0.5, 1 - bias.targetRTP));
-  if (houseEdge <= 0) return;
-
-  const player = players[playerIndex];
-  if (!player) return;
-
-  const boostFactor = houseEdge * 8; // 0..4
-
-  if (player.isBot) {
-    const captureNums = findCaptureNumbers(state, playerIndex);
-    for (const n of captureNums) {
-      if (n <= 6) weights[n - 1] += boostFactor;
-    }
-    const finishNums = findFinishNumbers(state, playerIndex);
-    for (const n of finishNums) {
-      weights[n - 1] += boostFactor * 0.8;
-    }
-    weights[5] += boostFactor * 0.4;
-  } else if (hasBots) {
-    const captureNums = findCaptureNumbers(state, playerIndex);
-    for (const n of captureNums) {
-      if (n <= 6) {
-        weights[n - 1] = Math.max(0.2, weights[n - 1] - boostFactor * 0.5);
-      }
-    }
-  }
-}
-
 function updateHistory(gameId: string, state: GameState, playerIndex: number, result: number) {
   const player = state.players[playerIndex];
   if (!player) return;
@@ -290,9 +240,6 @@ export function smartRollDice(
       weights[5] += 6 * boost * 0.4;
     }
   }
-
-  // Bot bias (house edge) — só faz efeito aqui, no servidor
-  applyBotBias(weights, state, playerIndex, config);
 
   const result = weightedRoll(weights);
   updateHistory(gameId, state, playerIndex, result);
